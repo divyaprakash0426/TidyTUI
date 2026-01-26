@@ -79,7 +79,11 @@ tidytui
 
 ## ⚙️ Configuration
 
-TidyTUI looks for a `definitions.yaml` file in the current directory (or `$XDG_CONFIG_HOME/tidytui/` in future versions).
+TidyTUI looks for `definitions.yaml` in the following locations (in order):
+
+1. **Current Directory**: Useful for local development or portable use.
+2. **XDG Config**: `~/.config/tidytui/definitions.yaml` (Recommended for `cargo` or manual installs).
+3. **System Wide**: `/usr/share/tidytui/definitions.yaml` (Used by `.deb`, `.rpm`, or AUR packages).
 
 **Example `definitions.yaml`:**
 

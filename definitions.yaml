@@ -189,11 +189,17 @@ groups:
 
   # --- Antigravity ---
   - id: "app_antigravity"
-    name: "Antigravity Temp"
-    description: "Temporary files from Antigravity agent"
+    name: "Antigravity Cache"
+    description: "Browser profile caches"
     rules:
       - os: "any"
-        path: "~/.gemini/tmp"
+        path: "~/.gemini/antigravity-browser-profile/Default/Cache"
+      - os: "any"
+        path: "~/.gemini/antigravity-browser-profile/Default/Code Cache"
+      - os: "any"
+        path: "~/.gemini/antigravity-browser-profile/ShaderCache"
+      - os: "any"
+        path: "~/.gemini/antigravity-browser-profile/GrShaderCache"
 
   # --- Test ---
   - id: "test_group"

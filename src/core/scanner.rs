@@ -16,8 +16,8 @@ pub fn scan_path(path: &Path) -> u64 {
 pub fn scan_targets(targets: Vec<(String, String)>) -> Vec<CleanupItem> {
     targets
         .into_par_iter()
-        .map(|(name, path_str)| {
-            // Expand ~ to user home if necessary, though simpler to assume full paths or handle basic expansion
+        .filter_map(|(name, path_str)| {
+            // Expand ~ to user home if necessary
             let path = if path_str.starts_with("~") {
                 if let Some(home) = dirs::home_dir() {
                     let without_tilde = path_str.strip_prefix("~").unwrap_or(&path_str);
@@ -30,18 +30,23 @@ pub fn scan_targets(targets: Vec<(String, String)>) -> Vec<CleanupItem> {
                 std::path::PathBuf::from(path_str)
             };
 
-            let size_bytes = if path.exists() {
-                scan_path(&path)
+            if path.exists() {
+                let size_bytes = scan_path(&path);
+                
+                // Only return item if it exists. 
+                // Optionally we could filter by size > 0, but user might want to see empty cache folders too?
+                // The requirement was "assumes all folders are present... It should not right".
+                // So filtering by existence is the key.
+                
+                Some(CleanupItem {
+                    name,
+                    path,
+                    size_bytes,
+                    selected: false, // Default to unselected
+                    status: ItemStatus::Scanned,
+                })
             } else {
-                0
-            };
-
-            CleanupItem {
-                name,
-                path,
-                size_bytes,
-                selected: true, // Auto-select by default for now
-                status: ItemStatus::Scanned,
+                None
             }
         })
         .collect()
