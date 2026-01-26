@@ -2,6 +2,13 @@
 name = "TidyTUI"
 version = "0.1.0"
 edition = "2021"
+description = "A blazingly fast, terminal-based system cleaner written in Rust."
+license = "MIT"
+repository = "https://github.com/divyaprakash0426/TidyTUI"
+readme = "README.md"
+authors = ["Divyaprakash Dhurandhar <divyaprakash.0426@gmail.com>"]
+keywords = ["system", "cleaner", "tui", "cli", "maintenance"]
+categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
 anyhow = "1.0.100"

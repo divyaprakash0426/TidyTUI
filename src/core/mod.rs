@@ -7,8 +7,6 @@ pub mod cleaner;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemStatus {
-    Pending,
-    Scanning,
     Scanned,
     Deleted,
     Failed(String),
@@ -16,7 +14,6 @@ pub enum ItemStatus {
 
 #[derive(Debug, Clone)]
 pub struct CleanupItem {
-    pub group_id: String,
     pub name: String,
     pub path: PathBuf,
     pub size_bytes: u64,

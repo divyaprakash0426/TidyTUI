@@ -13,10 +13,10 @@ pub fn scan_path(path: &Path) -> u64 {
         .sum()
 }
 
-pub fn scan_targets(targets: Vec<(String, String, String)>) -> Vec<CleanupItem> {
+pub fn scan_targets(targets: Vec<(String, String)>) -> Vec<CleanupItem> {
     targets
         .into_par_iter()
-        .map(|(group_id, name, path_str)| {
+        .map(|(name, path_str)| {
             // Expand ~ to user home if necessary, though simpler to assume full paths or handle basic expansion
             let path = if path_str.starts_with("~") {
                 if let Some(home) = dirs::home_dir() {
@@ -37,7 +37,6 @@ pub fn scan_targets(targets: Vec<(String, String, String)>) -> Vec<CleanupItem> 
             };
 
             CleanupItem {
-                group_id,
                 name,
                 path,
                 size_bytes,

@@ -9,6 +9,10 @@ groups:
         path: "/var/cache/apt/archives/"
       - os: "debian"
         path: "/var/cache/apt/archives/"
+      - os: "fedora"
+        path: "/var/cache/dnf/"
+      - os: "opensuse"
+        path: "/var/cache/zypp/packages/"
 
   - id: "user_trash"
     name: "Trash Bin"
@@ -16,4 +20,184 @@ groups:
     rules:
       - os: "any"
         path: "~/.local/share/Trash/"
-      # Common alternative location or check XDG_DATA_HOME/Trash if needed later
+
+  # --- Developer Tools ---
+  - id: "dev_npm"
+    name: "NPM Cache"
+    description: "Node Package Manager cache"
+    rules:
+      - os: "any"
+        path: "~/.npm"
+
+  - id: "dev_pip"
+    name: "Pip Cache"
+    description: "Python package cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/pip"
+
+  - id: "dev_go"
+    name: "Go Build Cache"
+    description: "Go build artifacts"
+    rules:
+      - os: "any"
+        path: "~/.cache/go-build"
+  
+  - id: "dev_pnpm"
+    name: "PNPM Store"
+    description: "PNPM global store"
+    rules:
+      - os: "any"
+        path: "~/.local/share/pnpm/store"
+
+  - id: "dev_yarn"
+    name: "Yarn Cache"
+    description: "Yarn global cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/yarn"
+
+  # --- Editors & IDEs ---
+  - id: "ide_jetbrains"
+    name: "JetBrains Cache"
+    description: "IntelliJ/PyCharm/WebStorm caches"
+    rules:
+      - os: "any"
+        path: "~/.cache/JetBrains"
+
+  - id: "ide_vscode"
+    name: "VSCode Cache"
+    description: "Visual Studio Code cache"
+    rules:
+      - os: "any"
+        path: "~/.config/Code/Cache"
+      - os: "any"
+        path: "~/.config/Code/CachedData"
+
+  # --- System & Browsers ---
+  - id: "sys_thumbnails"
+    name: "Thumbnail Cache"
+    description: "Generated image thumbnails"
+    rules:
+      - os: "any"
+        path: "~/.cache/thumbnails"
+
+  - id: "browser_chrome"
+    name: "Chrome Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/google-chrome"
+  
+  - id: "browser_firefox"
+    name: "Firefox Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/mozilla/firefox"
+  
+  # --- AI & LLM Tools ---
+  - id: "ai_huggingface"
+    name: "HuggingFace Cache"
+    description: "Model and dataset cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/huggingface"
+
+  - id: "ai_torch"
+    name: "PyTorch Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/torch"
+
+  - id: "ai_claude"
+    name: "Claude App Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/claude"
+
+  # --- Linux Desktop & Window Managers ---
+  - id: "desktop_hyprland"
+    name: "Hyprland Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/hyprland"
+
+  - id: "desktop_rofi"
+    name: "Rofi Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/rofi-4.runcache"
+      - os: "any"
+        path: "~/.cache/rofi3.druncache"
+
+  - id: "desktop_wofi"
+    name: "Wofi Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/wofi-drun"
+      - os: "any"
+        path: "~/.cache/wofi-dmenu"
+
+  # --- Package Managers (AUR) ---
+  - id: "aur_yay"
+    name: "Yay Cache"
+    description: "AUR Helper cache (Arch)"
+    rules:
+      - os: "any"
+        path: "~/.cache/yay"
+
+  - id: "aur_paru"
+    name: "Paru Cache"
+    description: "AUR Helper cache (Arch)"
+    rules:
+      - os: "any"
+        path: "~/.cache/paru"
+
+  # --- Other Dev Tools ---
+  - id: "dev_nvim"
+    name: "Neovim Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/nvim"
+
+  - id: "dev_kitty"
+    name: "Kitty Terminal Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/kitty"
+
+  - id: "dev_docker"
+    name: "Docker Cache"
+    description: "Requires running docker prune usually, checking common paths"
+    rules:
+      # This is tricky as root usually owns it, but maybe user has rootless
+      - os: "any"
+        path: "~/.docker/desktop/cache" 
+
+  - id: "app_discord"
+    name: "Discord Cache"
+    rules:
+      - os: "any"
+        path: "~/.config/discord/Cache"
+      - os: "any"
+        path: "~/.config/discord/Code Cache"
+
+  - id: "app_spotify"
+    name: "Spotify Cache"
+    rules:
+      - os: "any"
+        path: "~/.cache/spotify"
+
+  # --- Antigravity ---
+  - id: "app_antigravity"
+    name: "Antigravity Temp"
+    description: "Temporary files from Antigravity agent"
+    rules:
+      - os: "any"
+        path: "~/.gemini/tmp"
+
+  # --- Test ---
+  - id: "test_group"
+    name: "Test Junk Folder"
+    rules:
+      - os: "any"
+        path: "~/test_junk"

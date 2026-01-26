@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 use anyhow::{Result, Context};
 use crate::core::{CleanupItem, ItemStatus};
 

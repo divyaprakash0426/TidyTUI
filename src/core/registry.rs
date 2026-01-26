@@ -29,19 +29,21 @@ pub fn load_definitions<P: AsRef<Path>>(path: P) -> Result<Definitions> {
     Ok(definitions)
 }
 
-pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String, String)> {
+pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String)> {
     let mut cleanable_paths = Vec::new();
     let os_id = match os_type {
         OsType::Arch => "arch",
         OsType::Ubuntu => "ubuntu",
         OsType::Debian => "debian",
+        OsType::Fedora => "fedora",
+        OsType::OpenSuse => "opensuse",
         OsType::Unknown(_) => "any", // Default fallback if needed, or handle specifically
     };
 
     for group in &definitions.groups {
         for rule in &group.rules {
             if rule.os == os_id || rule.os == "any" {
-                cleanable_paths.push((group.id.clone(), group.name.clone(), rule.path.clone()));
+                cleanable_paths.push((group.name.clone(), rule.path.clone()));
             }
         }
     }
