@@ -7,7 +7,9 @@
 
 TidyTUI is a lightweight, ncurses-style utility to scan your Linux system for accumulated "junk" (cache, logs, trash) and safely remove it. Built with performance and safety in mind, it uses parallel directory traversal to calculate sizes in milliseconds.
 
-![Preview](https://via.placeholder.com/800x400?text=TUI+Preview+Coming+Soon)
+## 📺 Showcase
+
+![Demo](assets/showcase/demo.gif)
 
 ## 🚀 Features
 
@@ -112,12 +114,6 @@ groups:
 ## 🤝 Contributing
 
 Contributions are welcome! Please open an issue or submit a PR.
-
-1. Fork it
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## 📜 License
 
