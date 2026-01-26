@@ -45,7 +45,7 @@ pub fn load_definitions() -> Result<Definitions> {
     Err(anyhow::anyhow!("Changes definitions.yaml not found in any of the search paths."))
 }
 
-pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String)> {
+pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String, String)> {
     let mut cleanable_paths = Vec::new();
     let os_id = match os_type {
         OsType::Arch => "arch",
@@ -59,7 +59,7 @@ pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String,
     for group in &definitions.groups {
         for rule in &group.rules {
             if rule.os == os_id || rule.os == "any" {
-                cleanable_paths.push((group.name.clone(), rule.path.clone()));
+                cleanable_paths.push((group.name.clone(), group.name.clone(), rule.path.clone()));
             }
         }
     }

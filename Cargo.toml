@@ -1,6 +1,6 @@
 [package]
 name = "TidyTUI"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "A blazingly fast, terminal-based system cleaner written in Rust."
 license = "MIT"

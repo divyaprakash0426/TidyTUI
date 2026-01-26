@@ -15,6 +15,7 @@ pub enum ItemStatus {
 #[derive(Debug, Clone)]
 pub struct CleanupItem {
     pub name: String,
+    pub category: String,
     pub path: PathBuf,
     pub size_bytes: u64,
     pub selected: bool,
