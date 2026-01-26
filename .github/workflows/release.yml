@@ -56,7 +56,15 @@ jobs:
     name: Update AUR
     needs: publish
     runs-on: ubuntu-latest
+    container: archlinux:base-devel
     steps:
+      - name: Install Git
+        run: pacman -Syu --noconfirm git openssh
+
+      # Fix for "dubious ownership" error in container
+      - name: Trust Git Repo
+        run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -72,8 +80,14 @@ jobs:
           # Since our PKGBUILD uses git describe, we need deep fetch
           git fetch --prune --unshallow --tags
           
+          # Fix ownership for builder user
+          useradd builder -m
+          passwd -d builder
+          printf 'builder ALL=(ALL) ALL\n' | tee -a /etc/sudoers
+          chown -R builder:builder .
+          
           cd packaging/aur
-          makepkg --printsrcinfo > .SRCINFO
+          su builder -c "makepkg --printsrcinfo" > .SRCINFO
 
       - name: Deploy to AUR
         uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
