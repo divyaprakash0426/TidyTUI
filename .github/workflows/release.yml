@@ -44,6 +44,7 @@ jobs:
         run: cargo publish || echo "Publish failed (likely already exists), continuing..."
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: |
@@ -54,6 +55,7 @@ jobs:
 
   update-aur:
     name: Update AUR
+    if: always() # Run even if publish fails or is skipped
     needs: publish
     runs-on: ubuntu-latest
     container: archlinux:base-devel
