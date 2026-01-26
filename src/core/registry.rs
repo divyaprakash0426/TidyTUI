@@ -23,10 +23,26 @@ pub struct Definitions {
     pub groups: Vec<Group>,
 }
 
-pub fn load_definitions<P: AsRef<Path>>(path: P) -> Result<Definitions> {
-    let content = fs::read_to_string(path)?;
-    let definitions: Definitions = serde_yaml::from_str(&content)?;
-    Ok(definitions)
+pub fn load_definitions() -> Result<Definitions> {
+    let mut paths = vec![
+        Path::new("definitions.yaml").to_path_buf(),
+        Path::new("/usr/share/tidytui/definitions.yaml").to_path_buf(),
+    ];
+
+    if let Some(config_dir) = dirs::config_dir() {
+        paths.insert(1, config_dir.join("tidytui").join("definitions.yaml"));
+    }
+
+    // Try to find the first path that exists
+    for path in paths {
+        if path.exists() {
+            let content = fs::read_to_string(&path)?;
+            let definitions: Definitions = serde_yaml::from_str(&content)?;
+            return Ok(definitions);
+        }
+    }
+
+    Err(anyhow::anyhow!("Changes definitions.yaml not found in any of the search paths."))
 }
 
 pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String)> {

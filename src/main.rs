@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 3. Scan Phase (Synchronous for MVP)
     // In a real app, this would be async or thread-pooled with UI updates
     let os_type = discovery::detect_os();
-    let definitions = registry::load_definitions("definitions.yaml")?;
+    let definitions = registry::load_definitions()?;
     let targets = registry::filter_rules(&definitions, &os_type);
     
     // Simple "Loading" indication could go here if we had a render loop running, 

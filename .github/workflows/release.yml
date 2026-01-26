@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg rpm
+
+      - name: Install Cargo Tools
+        run: |
+          cargo install cargo-deb
+          cargo install cargo-generate-rpm
+
+      - name: Build Release Binary
+        run: cargo build --release --locked
+
+      - name: Build Packages
+        run: |
+          cargo deb
+          cargo generate-rpm
+
+      - name: Publish to Crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/release/TidyTUI
+            target/debian/*.deb
+            target/generate-rpm/*.rpm
+          generate_release_notes: true
+
+  update-aur:
+    name: Update AUR
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate .SRCINFO
+        run: |
+          # We need to simulate the tag version for PKGBUILD env if it relies on git describe
+          # Ensuring we are on the tag
+          EXPORT_PKGVER=$(echo ${{ github.ref_name }} | sed 's/^v//')
+          
+          # Update PKGBUILD version if it's hardcoded, or rely on dynamic if setup
+          # For this template, we assume dynamic or matches tag.
+          
+          # Since our PKGBUILD uses git describe, we need deep fetch
+          git fetch --prune --unshallow --tags
+          
+          cd packaging/aur
+          makepkg --printsrcinfo > .SRCINFO
+
+      - name: Deploy to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: tidytui-git
+          pkgbuild: ./packaging/aur/PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "chore: update to ${{ github.ref_name }}"
+          ssh_keyscan_types: rsa,dsa,ecdsa,ed25519
