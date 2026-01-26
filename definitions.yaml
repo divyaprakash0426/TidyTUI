@@ -1,0 +1,19 @@
+groups:
+  - id: "pkg_manager"
+    name: "Package Cache"
+    description: "Cached installer files"
+    rules:
+      - os: "arch"
+        path: "/var/cache/pacman/pkg/"
+      - os: "ubuntu"
+        path: "/var/cache/apt/archives/"
+      - os: "debian"
+        path: "/var/cache/apt/archives/"
+
+  - id: "user_trash"
+    name: "Trash Bin"
+    description: "User's deleted files"
+    rules:
+      - os: "any"
+        path: "~/.local/share/Trash/"
+      # Common alternative location or check XDG_DATA_HOME/Trash if needed later

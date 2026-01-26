@@ -1,0 +1,86 @@
+# TidyTUI 🧹
+
+> **A blazingly fast, terminal-based system cleaner written in Rust.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/built_with-Rust-d63230.svg)](https://www.rust-lang.org/)
+
+TidyTUI is a lightweight, ncurses-style utility to scan your Linux system for accumulated "junk" (cache, logs, trash) and safely remove it. Built with performance and safety in mind, it uses parallel directory traversal to calculate sizes in milliseconds.
+
+![Preview](https://via.placeholder.com/800x400?text=TUI+Preview+Coming+Soon)
+
+## 🚀 Features
+
+- **⚡ Blazingly Fast**: Powered by `rayon` for multi-threaded scanning and `walkdir` for efficient traversal.
+- **🛡️ Safety First**: Defaults to **Dry-Run Mode**. You must explicitly toggle "Danger Mode" to delete files.
+- **🐧 Distro Agnostic**: Automatically detects your OS (Arch, Ubuntu, Debian, etc.) and applies relevant cleaning rules.
+- **🛠️ Configurable**: Define your own cleaning groups and paths in simple YAML.
+- **📦 Zero Dependencies**: Compiles to a single binary.
+
+## 📦 Installation
+
+### From Source
+
+```bash
+git clone https://github.com/yourusername/tidytui.git
+cd tidytui
+cargo install --path .
+```
+
+## 🎮 Usage
+
+```bash
+tidytui
+```
+
+### Controls
+
+| Key | Action |
+|:---|:---|
+| `j` / `k` | Navigate items |
+| `Space` | Toggle selection |
+| `d`     | **Toggle Mode** (Dry-Run ↔ Danger) |
+| `Enter` | Clean selected items |
+| `q`     | Quit |
+
+## ⚙️ Configuration
+
+TidyTUI looks for a `definitions.yaml` file in the current directory (or `$XDG_CONFIG_HOME/tidytui/` in future versions).
+
+**Example `definitions.yaml`:**
+
+```yaml
+groups:
+  - id: "pacman_cache"
+    name: "Pacman Cache"
+    description: "Arch Linux package cache"
+    rules:
+      - os: "arch"
+        path: "/var/cache/pacman/pkg/"
+
+  - id: "npm_cache"
+    name: "NPM Cache"
+    rules:
+      - os: "any"
+        path: "~/.npm"
+```
+
+## 🏗️ Technical Stack
+
+- **TUI**: [ratatui](https://github.com/ratatui-org/ratatui) + [crossterm](https://github.com/crossterm-rs/crossterm)
+- **Parallelism**: [rayon](https://github.com/rayon-rs/rayon)
+- **Serialization**: [serde](https://serde.rs/)
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue or submit a PR.
+
+1. Fork it
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📜 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
