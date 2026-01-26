@@ -22,3 +22,29 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml = "0.9.34"
 thiserror = "2.0.18"
 walkdir = "2.5.0"
+
+[package.metadata.deb]
+maintainer = "Divyaprakash Dhurandhar <divyaprakash.0426@gmail.com>"
+copyright = "2024-2025 Divyaprakash Dhurandhar"
+license-file = ["LICENSE", "4"]
+extended-description = """
+TidyTUI is a blazingly fast, terminal-based system cleaner written in Rust.
+It helps you reclaim disk space by identifying and removing unnecessary files
+like caches, logs, and temporary files safely.
+"""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/TidyTUI", "usr/bin/tidytui", "755"],
+    ["definitions.yaml", "usr/share/tidytui/definitions.yaml", "644"],
+    ["README.md", "usr/share/doc/tidytui/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/TidyTUI", dest = "/usr/bin/tidytui", mode = "755" },
+    { source = "definitions.yaml", dest = "/usr/share/tidytui/definitions.yaml", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/tidytui/README.md", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/tidytui/LICENSE", mode = "644" },
+]

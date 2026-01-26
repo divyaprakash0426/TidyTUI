@@ -19,11 +19,45 @@ TidyTUI is a lightweight, ncurses-style utility to scan your Linux system for ac
 
 ## 📦 Installation
 
-### From Source
+### 📦 Arch Linux (AUR)
+
+You can install `tidytui` from the AUR using your favorite helper:
 
 ```bash
-git clone https://github.com/yourusername/tidytui.git
-cd tidytui
+yay -S tidytui-git
+# or
+paru -S tidytui-git
+```
+
+### 🦀 Crates.io
+
+If you have Rust installed, you can grab it directly from crates.io:
+
+```bash
+cargo install TidyTUI
+```
+
+### 🐧 Debian / Ubuntu (.deb)
+
+Download the latest `.deb` from the [Releases](https://github.com/divyaprakash0426/TidyTUI/releases) page and install:
+
+```bash
+sudo apt install ./tidytui_*.deb
+```
+
+### 🎩 Fedora / RHEL / CentOS (.rpm)
+
+Download the latest `.rpm` from the [Releases](https://github.com/divyaprakash0426/TidyTUI/releases) page and install:
+
+```bash
+sudo dnf install ./tidytui-*.rpm
+```
+
+### 🛠️ Build from Source
+
+```bash
+git clone https://github.com/divyaprakash0426/TidyTUI.git
+cd TidyTUI
 cargo install --path .
 ```
 
