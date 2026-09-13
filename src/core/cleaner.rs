@@ -2,6 +2,38 @@ use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver};
+
+/// Progress messages from a background cleaning run. `idx` is the caller's
+/// index into its own item list. Exactly one `Done` is sent last.
+#[derive(Debug)]
+pub enum CleanEvent {
+    Started { idx: usize, name: String },
+    Finished { idx: usize, status: ItemStatus },
+    Done,
+}
+
+/// Cleans sequentially on a background thread (deletion is IO-bound, so
+/// parallelism buys nothing and would muddle progress reporting).
+pub fn spawn_clean(jobs: Vec<(usize, CleanupItem)>, dry_run: bool) -> Receiver<CleanEvent> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for (idx, mut item) in jobs {
+            let _ = tx.send(CleanEvent::Started {
+                idx,
+                name: item.name.clone(),
+            });
+            // Outcome is captured in item.status; the Err duplicates it.
+            let _ = clean_item(&mut item, dry_run);
+            let _ = tx.send(CleanEvent::Finished {
+                idx,
+                status: item.status,
+            });
+        }
+        let _ = tx.send(CleanEvent::Done);
+    });
+    rx
+}
 
 /// Removes every entry inside `dir` but keeps `dir` itself. Symlinks are
 /// unlinked, never followed. Continues past individual failures and reports
@@ -98,6 +130,41 @@ mod tests {
             status: ItemStatus::Scanned,
             mode,
         }
+    }
+
+    #[test]
+    fn spawn_clean_reports_each_item_then_done() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a"), b"x").unwrap();
+        let it = item(dir.path(), CleanMode::Contents);
+        let rx = spawn_clean(vec![(7, it)], false);
+        let events: Vec<CleanEvent> = rx.iter().collect();
+        assert!(matches!(events[0], CleanEvent::Started { idx: 7, .. }));
+        assert!(matches!(
+            events[1],
+            CleanEvent::Finished {
+                idx: 7,
+                status: ItemStatus::Deleted
+            }
+        ));
+        assert!(matches!(events[2], CleanEvent::Done));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn spawn_clean_dry_run_reports_dryrun_status() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a"), b"x").unwrap();
+        let rx = spawn_clean(vec![(0, item(dir.path(), CleanMode::Contents))], true);
+        let events: Vec<CleanEvent> = rx.iter().collect();
+        assert!(matches!(
+            events[1],
+            CleanEvent::Finished {
+                idx: 0,
+                status: ItemStatus::DryRun
+            }
+        ));
+        assert!(dir.path().join("a").exists());
     }
 
     #[test]
