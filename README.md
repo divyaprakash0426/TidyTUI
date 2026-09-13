@@ -16,6 +16,7 @@ TidyTUI is a lightweight, ncurses-style utility to scan your Linux system for ac
 - **⚡ Blazingly Fast**: Powered by `rayon` for multi-threaded scanning and `walkdir` for efficient traversal. The interface opens instantly and fills in as the scan streams results.
 - **🛡️ Safety First**: Defaults to **Dry-Run Mode**. You must explicitly toggle "Danger Mode" to delete files. Caches are emptied, never removed, unless a rule says otherwise.
 - **📊 Disk-Aware Dashboard**: Shows how much of your disk the junk occupies, a per-category breakdown, and the largest offenders.
+- **🎨 Themes & Mouse**: Five colour themes (`--theme`, `TIDYTUI_THEME`, or `t` to cycle); click tabs and rows, scroll with the wheel.
 - **🎛️ Fine-Grained Selection**: Select all, whole categories or single items; fold categories; filter by name/path; sort by size or name; a details pane shows exactly which path will be touched.
 - **🐧 Distro Agnostic**: Automatically detects your OS (Arch, Ubuntu, Debian, etc.) and applies relevant cleaning rules.
 - **🛠️ Configurable**: Define your own cleaning groups and paths in simple YAML, with age (`keep_days`) and size (`min_size`) thresholds.
@@ -87,6 +88,8 @@ Options:
       --json           With --list, print machine-readable JSON instead of a table
   -s, --select <ID>    Pre-select these definition group ids (comma-separated)
   -y, --yes            Clean the --select'ed groups without the TUI (dry-run unless --danger)
+      --theme <THEME>  Colour theme: default, nord, gruvbox, dracula or mono [env: TIDYTUI_THEME]
+      --no-mouse       Disable mouse support (lets the terminal select text instead)
 ```
 
 Group ids are the `id` fields from `definitions.yaml`; `--list` prints them in
@@ -114,6 +117,7 @@ the five **Largest Items**.
 | `z` / `Z` | Fold the highlighted category / fold or unfold all |
 | `/`     | Filter by name or path (`Enter` keeps it, `Esc` clears it) |
 | `s`     | Cycle sort: default → size → name |
+| `t`     | Cycle colour theme: default → nord → gruvbox → dracula → mono |
 | `r`     | Rescan |
 | `d`     | **Toggle Mode** (Dry-Run ↔ Danger) |
 | `Enter` | Clean selected items (asks for confirmation) |

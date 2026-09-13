@@ -1,10 +1,11 @@
 use crate::core::paths::shorten_home;
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use crate::tui::app::{App, ResultRow, SortMode};
+use crate::tui::theme::Theme;
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
@@ -39,6 +40,7 @@ pub fn render_with_home(f: &mut Frame, app: &mut App, area: Rect, home: Option<&
 }
 
 fn render_list(f: &mut Frame, app: &mut App, area: Rect, home: Option<&Path>) {
+    let th = app.theme;
     let block = Block::default().borders(Borders::ALL).title(title(app));
 
     if app.rendered_rows.is_empty() {
@@ -49,12 +51,9 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect, home: Option<&Path>) {
         } else {
             "Nothing to clean 🎉"
         };
-        let para = Paragraph::new(Line::from(Span::styled(
-            msg,
-            Style::default().fg(Color::DarkGray),
-        )))
-        .block(block)
-        .alignment(Alignment::Center);
+        let para = Paragraph::new(Line::from(Span::styled(msg, Style::default().fg(th.dim))))
+            .block(block)
+            .alignment(Alignment::Center);
         f.render_widget(para, area);
         return;
     }
@@ -68,20 +67,16 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect, home: Option<&Path>) {
         .map(|row| match row {
             ResultRow::CategoryHeader(cat) => {
                 let count = counts.get(cat).copied().unwrap_or(0);
-                header_row(items, collapsed.contains(cat), cat, count)
+                header_row(th, items, collapsed.contains(cat), cat, count)
             }
-            ResultRow::Item(idx) => item_row(&items[*idx], home, inner_width),
+            ResultRow::Item(idx) => item_row(th, &items[*idx], home, inner_width),
             ResultRow::EmptyLine => ListItem::new(""),
         })
         .collect();
 
     let list = List::new(rows)
         .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(Style::default().bg(th.surface).add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(list, area, &mut app.state);
@@ -103,7 +98,13 @@ fn title(app: &App) -> String {
     t
 }
 
-fn header_row<'a>(items: &[CleanupItem], collapsed: bool, cat: &str, count: usize) -> ListItem<'a> {
+fn header_row<'a>(
+    th: Theme,
+    items: &[CleanupItem],
+    collapsed: bool,
+    cat: &str,
+    count: usize,
+) -> ListItem<'a> {
     let marker = if collapsed { "▸" } else { "▾" };
     let selected = items
         .iter()
@@ -111,14 +112,12 @@ fn header_row<'a>(items: &[CleanupItem], collapsed: bool, cat: &str, count: usiz
         .count();
     let mut spans = vec![Span::styled(
         format!("{marker} {cat} ({count})"),
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
     )];
     if selected > 0 {
         spans.push(Span::styled(
             format!("  {selected} selected"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(th.dim),
         ));
     }
     ListItem::new(Line::from(spans))
@@ -134,28 +133,29 @@ fn mode_label(item: &CleanupItem) -> &'static str {
     }
 }
 
-fn status_span(item: &CleanupItem) -> Span<'static> {
+fn status_span(th: Theme, item: &CleanupItem) -> Span<'static> {
     match &item.status {
         ItemStatus::Scanned if item.locked => {
-            Span::styled("needs root", Style::default().fg(Color::Red))
+            Span::styled("needs root", Style::default().fg(th.danger))
         }
-        ItemStatus::Scanned => Span::styled("scanned", Style::default().fg(Color::DarkGray)),
+        ItemStatus::Scanned => Span::styled("scanned", Style::default().fg(th.dim)),
         ItemStatus::DryRun if item.command.is_some() => {
-            Span::styled("would run", Style::default().fg(Color::Cyan))
+            Span::styled("would run", Style::default().fg(th.accent))
         }
-        ItemStatus::DryRun => Span::styled("would delete", Style::default().fg(Color::Cyan)),
+        ItemStatus::DryRun => Span::styled("would delete", Style::default().fg(th.accent)),
         ItemStatus::Deleted if item.command.is_some() => {
-            Span::styled("ran", Style::default().fg(Color::Green))
+            Span::styled("ran", Style::default().fg(th.ok))
         }
-        ItemStatus::Deleted => Span::styled("deleted", Style::default().fg(Color::Green)),
+        ItemStatus::Deleted => Span::styled("deleted", Style::default().fg(th.ok)),
         ItemStatus::Failed(reason) => {
-            Span::styled(format!("failed: {reason}"), Style::default().fg(Color::Red))
+            Span::styled(format!("failed: {reason}"), Style::default().fg(th.danger))
         }
     }
 }
 
 /// One-line summary of the highlighted item: description, file count, mode.
 fn info_bar(app: &App) -> Paragraph<'static> {
+    let th = app.theme;
     let Some(item) = app.selected_item() else {
         return Paragraph::new("");
     };
@@ -169,17 +169,15 @@ fn info_bar(app: &App) -> Paragraph<'static> {
     }
     spans.push(Span::raw(format!("{} files", item.file_count)));
     spans.push(Span::raw("  ·  "));
-    spans.push(Span::styled(
-        mode_label(item),
-        Style::default().fg(Color::DarkGray),
-    ));
+    spans.push(Span::styled(mode_label(item), Style::default().fg(th.dim)));
     Paragraph::new(Line::from(spans))
 }
 
 /// Right-hand pane with the full details of the highlighted row.
 fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
+    let th = app.theme;
     let block = Block::default().borders(Borders::ALL).title(" Details ");
-    let label = |s: &'static str| Span::styled(format!("{s:<9}"), Style::default().fg(Color::Cyan));
+    let label = |s: &'static str| Span::styled(format!("{s:<9}"), Style::default().fg(th.accent));
 
     let lines: Vec<Line> = match app.highlighted_row() {
         Some(ResultRow::Item(idx)) => {
@@ -200,21 +198,21 @@ fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
                     label("Size"),
                     Span::styled(
                         ByteSize(item.size_bytes).to_string(),
-                        Style::default().fg(Color::Magenta),
+                        Style::default().fg(th.size),
                     ),
                     Span::raw(format!(" · {} files", item.file_count)),
                 ]),
                 Line::from(vec![label("Mode"), Span::raw(mode_label(item))]),
-                Line::from(vec![label("Status"), status_span(item)]),
+                Line::from(vec![label("Status"), status_span(th, item)]),
                 Line::from(vec![
                     label("Group"),
-                    Span::styled(item.group_id.clone(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(item.group_id.clone(), Style::default().fg(th.dim)),
                 ]),
             ];
             if let Some(cmd) = &item.command {
                 lines.push(Line::from(vec![
                     label("Command"),
-                    Span::styled(cmd.clone(), Style::default().fg(Color::Yellow)),
+                    Span::styled(cmd.clone(), Style::default().fg(th.warn)),
                 ]));
             }
             if item.locked {
@@ -222,7 +220,7 @@ fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
                     label("Access"),
                     Span::styled(
                         "read-only — re-run with sudo to clean",
-                        Style::default().fg(Color::Red),
+                        Style::default().fg(th.danger),
                     ),
                 ]));
             }
@@ -253,22 +251,19 @@ fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
                 Line::from(vec![label("Items"), Span::raw(idxs.len().to_string())]),
                 Line::from(vec![
                     label("Size"),
-                    Span::styled(
-                        ByteSize(size).to_string(),
-                        Style::default().fg(Color::Magenta),
-                    ),
+                    Span::styled(ByteSize(size).to_string(), Style::default().fg(th.size)),
                     Span::raw(format!(" · {files} files")),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
                     "Space selects all · z folds",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(th.dim),
                 )),
             ]
         }
         _ => vec![Line::from(Span::styled(
             "Select a row to see details",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(th.dim),
         ))],
     };
 
@@ -283,10 +278,15 @@ const SIZE_COL: usize = 10;
 const ROW_PREFIX: usize = 3 + 4;
 const MIN_PATH_COL: usize = 8;
 
-fn item_row<'a>(item: &'a CleanupItem, home: Option<&Path>, width: usize) -> ListItem<'a> {
+fn item_row<'a>(
+    th: Theme,
+    item: &'a CleanupItem,
+    home: Option<&Path>,
+    width: usize,
+) -> ListItem<'a> {
     let checkbox = if item.selected { "[x] " } else { "[ ] " };
     let size = ByteSize(item.size_bytes).to_string();
-    let status = (item.status != ItemStatus::Scanned || item.locked).then(|| status_span(item));
+    let status = (item.status != ItemStatus::Scanned || item.locked).then(|| status_span(th, item));
     let status_width = status.as_ref().map_or(0, |s| s.width() + 2);
 
     // Path and status share what is left; the path keeps a minimum and the
@@ -317,14 +317,8 @@ fn item_row<'a>(item: &'a CleanupItem, home: Option<&Path>, width: usize) -> Lis
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
-        Span::styled(
-            format!("{path:<path_col$}"),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            format!("{size:>SIZE_COL$}"),
-            Style::default().fg(Color::Magenta),
-        ),
+        Span::styled(format!("{path:<path_col$}"), Style::default().fg(th.dim)),
+        Span::styled(format!("{size:>SIZE_COL$}"), Style::default().fg(th.size)),
     ];
     if let Some(status) = status {
         spans.push(Span::raw("  "));

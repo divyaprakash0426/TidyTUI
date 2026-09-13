@@ -1,5 +1,6 @@
 use crate::core::disk::{self, DiskUsage};
 use crate::tui::app::App;
+use crate::tui::theme::Theme;
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -9,15 +10,6 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
-
-const PALETTE: [Color; 6] = [
-    Color::Cyan,
-    Color::Magenta,
-    Color::Yellow,
-    Color::Green,
-    Color::Blue,
-    Color::Red,
-];
 
 const TOP_ITEMS: usize = 5;
 
@@ -54,39 +46,37 @@ fn bold(color: Color) -> Style {
 }
 
 fn render_overview(f: &mut Frame, app: &App, area: Rect) {
+    let th = app.theme;
     let total_files: u64 = app.items.iter().map(|i| i.file_count).sum();
 
     let mut lines = vec![
         Line::from(vec![
             Span::raw("Locations  "),
-            Span::styled(app.items.len().to_string(), bold(Color::Cyan)),
+            Span::styled(app.items.len().to_string(), bold(th.accent)),
             Span::styled(
                 format!("  ({total_files} files)"),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(th.dim),
             ),
         ]),
         Line::from(vec![
             Span::raw("Junk found "),
-            Span::styled(ByteSize(app.total_size).to_string(), bold(Color::Magenta)),
+            Span::styled(ByteSize(app.total_size).to_string(), bold(th.size)),
         ]),
         Line::from(vec![
             Span::raw("Selected   "),
-            Span::styled(
-                format!("{} items", app.selected_count()),
-                bold(Color::Yellow),
-            ),
+            Span::styled(format!("{} items", app.selected_count()), bold(th.warn)),
             Span::raw(format!("  {}", ByteSize(app.selected_size()))),
         ]),
     ];
     if app.is_scanning() {
         lines.push(Line::from(Span::styled(
             format!("⟳ Scanning {}/{}", app.scan.checked, app.scan.total),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(th.warn),
         )));
     } else {
         lines.push(Line::from(Span::styled(
             "Scan complete · press r to rescan",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(th.dim),
         )));
     }
 
@@ -99,26 +89,26 @@ fn render_overview(f: &mut Frame, app: &App, area: Rect) {
 
 /// Junk relative to the disk (when known) decides the verdict; the absolute
 /// thresholds are only a fallback for exotic filesystems.
-fn verdict(total_junk: u64, disk: Option<DiskUsage>) -> (Color, &'static str, String) {
+fn verdict(th: Theme, total_junk: u64, disk: Option<DiskUsage>) -> (Color, &'static str, String) {
     match disk {
         Some(d) => {
             let frac = d.fraction_of_total(total_junk);
             let (color, label) = if frac < 0.01 {
-                (Color::Green, "Clean")
+                (th.ok, "Clean")
             } else if frac < 0.05 {
-                (Color::Yellow, "Moderate")
+                (th.warn, "Moderate")
             } else {
-                (Color::Red, "Critical")
+                (th.danger, "Critical")
             };
             (color, label, format!("{:.1}% of disk", frac * 100.0))
         }
         None => {
             let (color, label) = if total_junk < 100_000_000 {
-                (Color::Green, "Clean")
+                (th.ok, "Clean")
             } else if total_junk < 500_000_000 {
-                (Color::Yellow, "Moderate")
+                (th.warn, "Moderate")
             } else {
-                (Color::Red, "Critical")
+                (th.danger, "Critical")
             };
             (color, label, String::new())
         }
@@ -126,7 +116,8 @@ fn verdict(total_junk: u64, disk: Option<DiskUsage>) -> (Color, &'static str, St
 }
 
 fn render_disk(f: &mut Frame, app: &App, disk: Option<DiskUsage>, area: Rect) {
-    let (color, label, relative) = verdict(app.total_size, disk);
+    let th = app.theme;
+    let (color, label, relative) = verdict(th, app.total_size, disk);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" Disk · {label} "))
@@ -149,7 +140,7 @@ fn render_disk(f: &mut Frame, app: &App, disk: Option<DiskUsage>, area: Rect) {
         Some(d) => {
             let used_pct = (d.used_fraction() * 100.0).round().clamp(0.0, 100.0) as u16;
             let gauge = Gauge::default()
-                .gauge_style(Style::default().fg(Color::Blue).bg(Color::Black))
+                .gauge_style(Style::default().fg(th.gauge).bg(th.surface))
                 .percent(used_pct)
                 .label(format!(
                     "{used_pct}% used · {} / {}",
@@ -160,7 +151,7 @@ fn render_disk(f: &mut Frame, app: &App, disk: Option<DiskUsage>, area: Rect) {
             f.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::raw("Reclaimable "),
-                    Span::styled(ByteSize(app.total_size).to_string(), bold(Color::Magenta)),
+                    Span::styled(ByteSize(app.total_size).to_string(), bold(th.size)),
                     Span::styled(format!("  ({relative})"), Style::default().fg(color)),
                 ])),
                 rows[2],
@@ -170,14 +161,14 @@ fn render_disk(f: &mut Frame, app: &App, disk: Option<DiskUsage>, area: Rect) {
             f.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::raw("Reclaimable "),
-                    Span::styled(ByteSize(app.total_size).to_string(), bold(Color::Magenta)),
+                    Span::styled(ByteSize(app.total_size).to_string(), bold(th.size)),
                 ])),
                 rows[0],
             );
             f.render_widget(
                 Paragraph::new(Span::styled(
                     "Disk capacity unavailable · thresholds: <100 MB clean, <500 MB moderate",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(th.dim),
                 )),
                 rows[2],
             );
@@ -186,6 +177,7 @@ fn render_disk(f: &mut Frame, app: &App, disk: Option<DiskUsage>, area: Rect) {
 }
 
 fn render_distribution(f: &mut Frame, app: &App, area: Rect) {
+    let th = app.theme;
     let mut by_cat: HashMap<&str, u64> = HashMap::new();
     for item in &app.items {
         *by_cat.entry(item.category.as_str()).or_insert(0) += item.size_bytes;
@@ -212,7 +204,7 @@ fn render_distribution(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(idx, (cat, size))| {
-            let color = PALETTE[idx % PALETTE.len()];
+            let color = th.palette[idx % th.palette.len()];
             let pct = if app.total_size > 0 {
                 *size as f64 / app.total_size as f64 * 100.0
             } else {
@@ -228,14 +220,11 @@ fn render_distribution(f: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled(format!("{:<label_w$}", truncate(cat, label_w)), bold(color)),
                 Span::styled("█".repeat(filled), Style::default().fg(color)),
-                Span::styled(
-                    "░".repeat(bar_w - filled),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled("░".repeat(bar_w - filled), Style::default().fg(th.dim)),
                 Span::raw(format!(" {pct_str:>6}")),
                 Span::styled(
                     format!(" {:>10}", ByteSize(*size).to_string()),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(th.dim),
                 ),
             ])
         })
@@ -245,6 +234,7 @@ fn render_distribution(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_largest(f: &mut Frame, app: &App, area: Rect) {
+    let th = app.theme;
     let mut items: Vec<_> = app.items.iter().collect();
     items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
 
@@ -254,14 +244,11 @@ fn render_largest(f: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(n, item)| {
             Line::from(vec![
-                Span::styled(format!("{}. ", n + 1), Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{:<24}", truncate(&item.name, 24)),
-                    bold(Color::White),
-                ),
+                Span::styled(format!("{}. ", n + 1), Style::default().fg(th.dim)),
+                Span::styled(format!("{:<24}", truncate(&item.name, 24)), bold(th.text)),
                 Span::styled(
                     format!("{:>10}", ByteSize(item.size_bytes).to_string()),
-                    Style::default().fg(Color::Magenta),
+                    Style::default().fg(th.size),
                 ),
             ])
         })

@@ -1,9 +1,10 @@
 use crate::core::paths::shorten_home;
 use crate::tui::app::{App, CleanSummary};
+use crate::tui::theme::Theme;
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph, Wrap},
     Frame,
@@ -12,6 +13,7 @@ use ratatui::{
 const MAX_PREVIEW_PATHS: usize = 5;
 
 pub fn render_confirm(f: &mut Frame, app: &App) {
+    let th = app.theme;
     let selected_items = app.selected_count();
     let selected_size = ByteSize(app.selected_size());
     let home = dirs::home_dir();
@@ -22,7 +24,7 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
     let block = Block::default()
         .title(" CONFIRM CLEANUP ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(th.warn))
         .padding(Padding::uniform(1));
 
     let mut text = vec![
@@ -30,16 +32,12 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
             Span::raw("Clean "),
             Span::styled(
                 selected_items.to_string(),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Cyan),
+                Style::default().add_modifier(Modifier::BOLD).fg(th.accent),
             ),
             Span::raw(" items, freeing "),
             Span::styled(
                 selected_size.to_string(),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Magenta),
+                Style::default().add_modifier(Modifier::BOLD).fg(th.size),
             ),
             Span::raw("?"),
         ]),
@@ -54,13 +52,13 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
     {
         text.push(Line::from(Span::styled(
             format!("  {}", shorten_home(&item.path, home.as_deref())),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(th.dim),
         )));
     }
     if selected_items > MAX_PREVIEW_PATHS {
         text.push(Line::from(Span::styled(
             format!("  … and {} more", selected_items - MAX_PREVIEW_PATHS),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(th.dim),
         )));
     }
 
@@ -74,18 +72,18 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
         };
         text.push(Line::from(Span::styled(
             format!("⚠ {locked} selected {noun} root and will fail"),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(th.warn),
         )));
     }
     text.push(if app.dry_run {
         Line::from(Span::styled(
             "MODE: DRY-RUN (No files will be deleted)",
-            Style::default().fg(Color::Green),
+            Style::default().fg(th.ok),
         ))
     } else {
         Line::from(Span::styled(
             "WARNING: DANGER MODE (FILES WILL BE DELETED)",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(th.danger).add_modifier(Modifier::BOLD),
         ))
     });
     text.push(Line::from(""));
@@ -93,14 +91,12 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
         Span::raw("Press "),
         Span::styled(
             "[y]",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(th.ok).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" to proceed, "),
         Span::styled(
             "[n]",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(th.danger).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" to cancel."),
     ]));
@@ -113,11 +109,11 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
 
 const MAX_FAILURES_SHOWN: usize = 6;
 
-pub fn render_summary(f: &mut Frame, summary: &CleanSummary) {
+pub fn render_summary(f: &mut Frame, th: Theme, summary: &CleanSummary) {
     let (title, verb, color) = if summary.dry_run {
-        (" Dry-Run Complete ", "Would delete", Color::Cyan)
+        (" Dry-Run Complete ", "Would delete", th.accent)
     } else {
-        (" Cleanup Complete ", "Deleted", Color::Green)
+        (" Cleanup Complete ", "Deleted", th.ok)
     };
 
     let mut text = vec![
@@ -134,9 +130,7 @@ pub fn render_summary(f: &mut Frame, summary: &CleanSummary) {
             }),
             Span::styled(
                 ByteSize(summary.freed_bytes).to_string(),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(th.size).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
@@ -145,23 +139,23 @@ pub fn render_summary(f: &mut Frame, summary: &CleanSummary) {
     if summary.failed.is_empty() {
         text.push(Line::from(Span::styled(
             "No failures",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(th.dim),
         )));
     } else {
         text.push(Line::from(Span::styled(
             format!("{} failed:", summary.failed.len()),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(th.danger).add_modifier(Modifier::BOLD),
         )));
         for (name, reason) in summary.failed.iter().take(MAX_FAILURES_SHOWN) {
             text.push(Line::from(vec![
-                Span::styled(format!("  {name}: "), Style::default().fg(Color::Red)),
-                Span::styled(reason.clone(), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("  {name}: "), Style::default().fg(th.danger)),
+                Span::styled(reason.clone(), Style::default().fg(th.dim)),
             ]));
         }
         if summary.failed.len() > MAX_FAILURES_SHOWN {
             text.push(Line::from(Span::styled(
                 format!("  … and {} more", summary.failed.len() - MAX_FAILURES_SHOWN),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(th.dim),
             )));
         }
     }
@@ -171,9 +165,7 @@ pub fn render_summary(f: &mut Frame, summary: &CleanSummary) {
         Span::raw("Press "),
         Span::styled(
             "Enter",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" to continue"),
     ]));
@@ -218,7 +210,14 @@ fn centered_fixed_height(percent_x: u16, height: u16, r: Rect) -> Rect {
         .split(rows[1])[1]
 }
 
-pub fn render_progress(f: &mut Frame, current: usize, total: usize, item_name: &str, area: Rect) {
+pub fn render_progress(
+    f: &mut Frame,
+    th: Theme,
+    current: usize,
+    total: usize,
+    item_name: &str,
+    area: Rect,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -240,13 +239,13 @@ pub fn render_progress(f: &mut Frame, current: usize, total: usize, item_name: &
                 .borders(Borders::ALL)
                 .title(" Cleaning Progress "),
         )
-        .gauge_style(Style::default().fg(Color::Cyan).bg(Color::Black))
+        .gauge_style(Style::default().fg(th.accent).bg(th.surface))
         .percent(percentage)
         .label(format!("{current}/{total}"));
 
     let info = Paragraph::new(format!("Cleaning: {item_name}"))
         .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::Yellow));
+        .style(Style::default().fg(th.warn));
 
     f.render_widget(info, chunks[0]);
     f.render_widget(gauge, chunks[1]);
@@ -285,7 +284,7 @@ mod tests {
             freed_bytes: 2 * 1024 * 1024,
             failed: vec![("Trash".into(), "permission denied".into())],
         };
-        let s = render_to_string(100, 24, |f| render_summary(f, &summary));
+        let s = render_to_string(100, 24, |f| render_summary(f, Theme::default(), &summary));
         assert!(s.contains("Cleanup Complete"), "{s}");
         assert!(s.contains("Deleted 3 items"), "{s}");
         assert!(s.contains("2.0 MiB"), "{s}");
@@ -303,7 +302,7 @@ mod tests {
             freed_bytes: 10,
             failed: vec![],
         };
-        let s = render_to_string(100, 24, |f| render_summary(f, &summary));
+        let s = render_to_string(100, 24, |f| render_summary(f, Theme::default(), &summary));
         assert!(s.contains("Dry-Run"), "{s}");
         assert!(s.contains("Would delete 2 items"), "{s}");
     }

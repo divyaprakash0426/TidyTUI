@@ -71,6 +71,7 @@ fn handle_viewing(app: &mut App, code: KeyCode) -> Action {
         KeyCode::Char('z') => app.toggle_collapse(),
         KeyCode::Char('Z') => app.toggle_collapse_all(),
         KeyCode::Char('s') => app.cycle_sort(),
+        KeyCode::Char('t') => app.cycle_theme(),
         KeyCode::Char('r') => {
             if !app.is_scanning() {
                 return Action::Rescan;
@@ -227,6 +228,17 @@ mod tests {
             app.collapsed.is_empty(),
             "Z toggles all off when any collapsed"
         );
+    }
+
+    #[test]
+    fn t_cycles_theme_but_not_while_filtering() {
+        let mut app = app_with_item();
+        handle_key(&mut app, key(KeyCode::Char('t')));
+        assert_eq!(app.theme.name, "nord");
+        handle_key(&mut app, key(KeyCode::Char('/')));
+        handle_key(&mut app, key(KeyCode::Char('t')));
+        assert_eq!(app.theme.name, "nord");
+        assert_eq!(app.filter, "t");
     }
 
     #[test]

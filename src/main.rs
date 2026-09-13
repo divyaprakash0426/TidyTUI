@@ -19,6 +19,7 @@ use crate::core::{
     scanner::{self, ScanEvent},
     ItemStatus,
 };
+use crate::tui::theme::Theme;
 use crate::tui::{
     app::{App, AppState, Tab},
     events::{handle_key, Action},
@@ -133,6 +134,7 @@ fn main() -> anyhow::Result<()> {
     let mut app = App::new();
     app.dry_run = cli.dry_run();
     app.preselect_groups = cli.select.clone();
+    app.theme = Theme::by_name(&cli.theme).unwrap_or_default();
     app.targets = targets;
 
     let mut runtime = Runtime::default();

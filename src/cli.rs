@@ -1,3 +1,4 @@
+use crate::tui::theme::Theme;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -32,6 +33,19 @@ pub struct Cli {
     /// Clean the --select'ed groups without the TUI (dry-run unless --danger)
     #[arg(short, long, requires = "select")]
     pub yes: bool,
+
+    /// Colour theme: default, nord, gruvbox, dracula or mono (press t to cycle)
+    #[arg(
+        long,
+        env = "TIDYTUI_THEME",
+        default_value = "default",
+        value_parser = clap::builder::PossibleValuesParser::new(Theme::names())
+    )]
+    pub theme: String,
+
+    /// Disable mouse support (lets the terminal select text instead)
+    #[arg(long)]
+    pub no_mouse: bool,
 }
 
 impl Cli {
@@ -62,6 +76,14 @@ mod tests {
     fn danger_disables_dry_run_and_conflicts_with_explicit_dry_run() {
         assert!(!parse(&["--danger"]).unwrap().dry_run());
         assert!(parse(&["--danger", "--dry-run"]).is_err());
+    }
+
+    #[test]
+    fn theme_is_validated_against_known_names() {
+        assert_eq!(parse(&["--theme", "nord"]).unwrap().theme, "nord");
+        assert!(parse(&["--theme", "solarized"]).is_err());
+        assert_eq!(parse(&[]).unwrap().theme, "default");
+        assert!(!parse(&[]).unwrap().no_mouse);
     }
 
     #[test]

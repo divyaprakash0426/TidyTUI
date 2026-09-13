@@ -2,7 +2,7 @@ use crate::tui::app::{App, AppState, Tab};
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
@@ -57,12 +57,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
             item_name,
         } => {
             let (current, total, name) = (*current, *total, item_name.clone());
-            modals::render_progress(f, current, total, &name, chunks[1]);
+            modals::render_progress(f, app.theme, current, total, &name, chunks[1]);
         }
         AppState::Summary(summary) => {
             let summary = summary.clone();
             render_active_tab(f, app, chunks[1]);
-            modals::render_summary(f, &summary);
+            modals::render_summary(f, app.theme, &summary);
         }
     }
 
@@ -73,11 +73,12 @@ fn render_active_tab(f: &mut Frame, app: &mut App, area: Rect) {
     match app.active_tab {
         Tab::Dashboard => dashboard::render(f, app, area),
         Tab::Results => results::render(f, app, area),
-        Tab::Help => help::render(f, area),
+        Tab::Help => help::render(f, app.theme, area),
     }
 }
 
 fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
+    let th = app.theme;
     let titles = vec![" [1] Dashboard ", " [2] Results ", " [3] Help "];
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" TidyTUI "))
@@ -86,32 +87,27 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
             Tab::Results => 1,
             Tab::Help => 2,
         })
-        .style(Style::default().fg(Color::Cyan))
-        .highlight_style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+        .style(Style::default().fg(th.accent))
+        .highlight_style(Style::default().fg(th.warn).add_modifier(Modifier::BOLD));
     f.render_widget(tabs, area);
 }
 
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
-    let dim = Style::default().fg(Color::DarkGray);
-    let key = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
+    let th = app.theme;
+    let dim = Style::default().fg(th.dim);
+    let key = Style::default().fg(th.accent).add_modifier(Modifier::BOLD);
 
     let mut status = vec![
         Span::raw("Found: "),
         Span::styled(
             ByteSize(app.total_size).to_string(),
-            Style::default().fg(Color::Magenta),
+            Style::default().fg(th.size),
         ),
         Span::styled("  ·  ", dim),
         Span::raw(format!("Selected: {} (", app.selected_count())),
         Span::styled(
             ByteSize(app.selected_size()).to_string(),
-            Style::default().fg(Color::Magenta),
+            Style::default().fg(th.size),
         ),
         Span::raw(")"),
     ];
@@ -119,21 +115,19 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         status.push(Span::styled("  ·  ", dim));
         status.push(Span::styled(
             format!("⟳ Scanning {}/{}", app.scan.checked, app.scan.total),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(th.warn),
         ));
     }
     status.push(Span::styled("  ·  ", dim));
     status.push(if app.dry_run {
         Span::styled(
             "DRY-RUN (Safe)",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(th.ok).add_modifier(Modifier::BOLD),
         )
     } else {
         Span::styled(
             "DANGER (DELETING)",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(th.danger).add_modifier(Modifier::BOLD),
         )
     });
 
@@ -141,7 +135,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("Filter: ", key),
             Span::raw(app.filter.clone()),
-            Span::styled("▏", Style::default().fg(Color::Yellow)),
+            Span::styled("▏", Style::default().fg(th.warn)),
             Span::styled("   Enter keep · Esc clear", dim),
         ])
     } else {
@@ -237,6 +231,28 @@ mod tests {
         app.dry_run = true;
         let s = render_to_string(120, 24, |f| render(f, &mut app));
         assert!(!s.contains("selected item needs root"), "{s}");
+    }
+
+    #[test]
+    fn theme_colours_reach_the_buffer() {
+        use crate::tui::theme::{Theme, NORD};
+        use ratatui::{backend::TestBackend, Terminal};
+        let colour_of = |theme: Theme| {
+            let mut app = app_with_item();
+            app.theme = theme;
+            let mut t = Terminal::new(TestBackend::new(120, 24)).unwrap();
+            t.draw(|f| render(f, &mut app)).unwrap();
+            // Cell inside the "Junk found" size value on the footer: styled th.size.
+            let buf = t.backend().buffer();
+            (0..buf.area.width)
+                .filter_map(|x| {
+                    let c = &buf[(x, buf.area.height - 3)];
+                    (c.fg == theme.size).then_some(c.fg)
+                })
+                .next()
+        };
+        assert_eq!(colour_of(NORD), Some(NORD.size));
+        assert_ne!(NORD.size, Theme::default().size);
     }
 
     #[test]

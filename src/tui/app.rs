@@ -1,5 +1,6 @@
 use crate::core::registry::Target;
 use crate::core::{CleanupItem, ItemStatus};
+use crate::tui::theme::Theme;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 
@@ -93,6 +94,7 @@ pub struct App {
     pub collapsed: HashSet<String>,
     /// Group ids from `--select`; matching items are selected as they arrive.
     pub preselect_groups: Vec<String>,
+    pub theme: Theme,
 }
 
 impl App {
@@ -114,6 +116,7 @@ impl App {
             sort: SortMode::default(),
             collapsed: HashSet::new(),
             preselect_groups: Vec::new(),
+            theme: Theme::default(),
         }
     }
 
@@ -436,6 +439,10 @@ impl App {
             self.state.select(Some(0));
             self.next();
         }
+    }
+
+    pub fn cycle_theme(&mut self) {
+        self.theme = self.theme.next();
     }
 
     pub fn cycle_sort(&mut self) {

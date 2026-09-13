@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "filesystem"]
 [dependencies]
 anyhow = "1.0.100"
 bytesize = { version = "2.3.1", features = ["serde"] }
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
 fs4 = "1.1.0"
