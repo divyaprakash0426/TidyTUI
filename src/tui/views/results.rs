@@ -124,8 +124,11 @@ fn header_row<'a>(items: &[CleanupItem], collapsed: bool, cat: &str, count: usiz
     ListItem::new(Line::from(spans))
 }
 
-fn mode_label(mode: CleanMode) -> &'static str {
-    match mode {
+fn mode_label(item: &CleanupItem) -> &'static str {
+    if item.command.is_some() {
+        return "runs command";
+    }
+    match item.mode {
         CleanMode::Contents => "empties folder, keeps it",
         CleanMode::Dir => "removes folder itself",
     }
@@ -137,7 +140,13 @@ fn status_span(item: &CleanupItem) -> Span<'static> {
             Span::styled("needs root", Style::default().fg(Color::Red))
         }
         ItemStatus::Scanned => Span::styled("scanned", Style::default().fg(Color::DarkGray)),
+        ItemStatus::DryRun if item.command.is_some() => {
+            Span::styled("would run", Style::default().fg(Color::Cyan))
+        }
         ItemStatus::DryRun => Span::styled("would delete", Style::default().fg(Color::Cyan)),
+        ItemStatus::Deleted if item.command.is_some() => {
+            Span::styled("ran", Style::default().fg(Color::Green))
+        }
         ItemStatus::Deleted => Span::styled("deleted", Style::default().fg(Color::Green)),
         ItemStatus::Failed(reason) => {
             Span::styled(format!("failed: {reason}"), Style::default().fg(Color::Red))
@@ -161,7 +170,7 @@ fn info_bar(app: &App) -> Paragraph<'static> {
     spans.push(Span::raw(format!("{} files", item.file_count)));
     spans.push(Span::raw("  ·  "));
     spans.push(Span::styled(
-        mode_label(item.mode),
+        mode_label(item),
         Style::default().fg(Color::DarkGray),
     ));
     Paragraph::new(Line::from(spans))
@@ -195,13 +204,19 @@ fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
                     ),
                     Span::raw(format!(" · {} files", item.file_count)),
                 ]),
-                Line::from(vec![label("Mode"), Span::raw(mode_label(item.mode))]),
+                Line::from(vec![label("Mode"), Span::raw(mode_label(item))]),
                 Line::from(vec![label("Status"), status_span(item)]),
                 Line::from(vec![
                     label("Group"),
                     Span::styled(item.group_id.clone(), Style::default().fg(Color::DarkGray)),
                 ]),
             ];
+            if let Some(cmd) = &item.command {
+                lines.push(Line::from(vec![
+                    label("Command"),
+                    Span::styled(cmd.clone(), Style::default().fg(Color::Yellow)),
+                ]));
+            }
             if item.locked {
                 lines.push(Line::from(vec![
                     label("Access"),
@@ -364,6 +379,7 @@ mod tests {
             mode: CleanMode::Contents,
             keep_days: None,
             locked: false,
+            command: None,
         }
     }
 
@@ -406,6 +422,18 @@ mod tests {
         assert!(s.contains("needs root"), "{s}");
         assert!(s.contains("1 need root"), "{s}");
         assert!(s.contains("re-run with sudo"), "{s}");
+    }
+
+    #[test]
+    fn command_item_shows_would_run_and_the_command_in_details() {
+        let mut app = App::new();
+        let mut it = item("Pacman", "/var/cache/pacman/pkg", 5, ItemStatus::DryRun);
+        it.command = Some("paccache -rk2".into());
+        app.set_items(vec![it]);
+        let s = render_to_string(&mut app);
+        assert!(s.contains("would run"), "{s}");
+        assert!(s.contains("Command  paccache -rk2"), "{s}");
+        assert!(s.contains("runs command"), "{s}");
     }
 
     #[test]

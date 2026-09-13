@@ -55,6 +55,8 @@ struct JsonItem<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     keep_days: Option<u64>,
     locked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<&'a str>,
 }
 
 pub fn list_json(items: &[CleanupItem]) -> String {
@@ -70,6 +72,7 @@ pub fn list_json(items: &[CleanupItem]) -> String {
             mode: i.mode,
             keep_days: i.keep_days,
             locked: i.locked,
+            command: i.command.as_deref(),
         })
         .collect();
     serde_json::to_string_pretty(&rows).expect("serialising plain data cannot fail")
@@ -172,6 +175,7 @@ mod tests {
             mode: CleanMode::Contents,
             keep_days: None,
             locked: false,
+            command: None,
         }
     }
 

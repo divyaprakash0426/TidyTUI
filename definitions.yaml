@@ -1,19 +1,36 @@
 groups:
+  # Package caches are cleaned with the package manager's own tool so it can
+  # keep what it needs (paccache keeps the two newest versions of each
+  # package). A rule with `command:` is skipped when that program is missing.
   - id: "pkg_manager"
     category: "System"
     name: "Package Cache"
-    description: "Cached installer files"
+    description: "Cached installer files (needs root)"
     rules:
       - os: "arch"
         path: "/var/cache/pacman/pkg/"
+        command: "paccache -rk2"
       - os: "ubuntu"
         path: "/var/cache/apt/archives/"
+        command: "apt-get clean"
       - os: "debian"
         path: "/var/cache/apt/archives/"
+        command: "apt-get clean"
       - os: "fedora"
         path: "/var/cache/dnf/"
+        command: "dnf clean packages"
       - os: "opensuse"
         path: "/var/cache/zypp/packages/"
+        command: "zypper clean"
+
+  - id: "sys_journal"
+    category: "System"
+    name: "System Journal"
+    description: "systemd logs older than two weeks (needs root)"
+    rules:
+      - os: "any"
+        path: "/var/log/journal"
+        command: "journalctl --vacuum-time=2weeks"
 
   - id: "user_trash"
     category: "System"
@@ -51,10 +68,11 @@ groups:
   - id: "dev_pnpm"
     category: "Developer Tools"
     name: "PNPM Store"
-    description: "PNPM global store"
+    description: "Packages no project references any more"
     rules:
       - os: "any"
         path: "~/.local/share/pnpm/store"
+        command: "pnpm store prune"
 
   - id: "dev_yarn"
     category: "Developer Tools"

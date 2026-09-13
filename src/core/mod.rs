@@ -47,4 +47,6 @@ pub struct CleanupItem {
     pub keep_days: Option<u64>,
     /// The current user lacks permission to clean this (needs root).
     pub locked: bool,
+    /// Shell command that performs the cleaning instead of deleting `path`.
+    pub command: Option<String>,
 }

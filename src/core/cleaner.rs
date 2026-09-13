@@ -1,8 +1,9 @@
-use crate::core::policy;
+use crate::core::{policy, scanner};
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::SystemTime;
 
@@ -11,8 +12,15 @@ use std::time::SystemTime;
 /// into its own item list. Exactly one `Done` is sent last.
 #[derive(Debug)]
 pub enum CleanEvent {
-    Started { name: String },
-    Finished { idx: usize, status: ItemStatus },
+    Started {
+        name: String,
+    },
+    /// `freed` is what the run actually reclaimed (re-measured for commands).
+    Finished {
+        idx: usize,
+        status: ItemStatus,
+        freed: u64,
+    },
     Done,
 }
 
@@ -30,6 +38,7 @@ pub fn spawn_clean(jobs: Vec<(usize, CleanupItem)>, dry_run: bool) -> Receiver<C
             let _ = tx.send(CleanEvent::Finished {
                 idx,
                 status: item.status,
+                freed: item.size_bytes,
             });
         }
         let _ = tx.send(CleanEvent::Done);
@@ -75,6 +84,40 @@ pub fn remove_contents(dir: &Path, keep_days: Option<u64>) -> Result<()> {
     }
 }
 
+/// Runs `cmd` through `sh -c`, then re-measures the path so `size_bytes`
+/// becomes what the command really reclaimed rather than the pre-run estimate.
+fn run_command(item: &mut CleanupItem, cmd: &str) -> Result<()> {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .with_context(|| format!("running `{cmd}`"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let last = stderr
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("");
+        let code = output
+            .status
+            .code()
+            .map(|c| format!("exit code {c}"))
+            .unwrap_or_else(|| "killed by signal".to_string());
+        anyhow::bail!("`{cmd}` failed ({code}) {last}");
+    }
+    let after = if item.path.exists() {
+        scanner::scan_path(&item.path).size_bytes
+    } else {
+        0
+    };
+    item.size_bytes = item.size_bytes.saturating_sub(after);
+    Ok(())
+}
+
 pub fn clean_item(item: &mut CleanupItem, dry_run: bool) -> Result<()> {
     if dry_run {
         item.status = ItemStatus::DryRun;
@@ -86,7 +129,9 @@ pub fn clean_item(item: &mut CleanupItem, dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    let result = if item.path.is_dir() {
+    let result = if let Some(cmd) = item.command.clone() {
+        run_command(item, &cmd)
+    } else if item.path.is_dir() {
         match item.mode {
             CleanMode::Contents => remove_contents(&item.path, item.keep_days),
             CleanMode::Dir => fs::remove_dir_all(&item.path).context("removing directory"),
@@ -110,6 +155,52 @@ pub fn clean_item(item: &mut CleanupItem, dry_run: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_item_runs_shell_and_reports_freed_bytes_by_remeasuring() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("big"), [0u8; 100]).unwrap();
+        fs::write(dir.path().join("small"), [0u8; 20]).unwrap();
+        let mut it = item(dir.path(), CleanMode::Contents);
+        it.size_bytes = 120;
+        it.command = Some(format!("rm {}", dir.path().join("big").display()));
+
+        clean_item(&mut it, false).unwrap();
+
+        assert_eq!(it.status, ItemStatus::Deleted);
+        assert_eq!(it.size_bytes, 100, "freed = before (120) - after (20)");
+        assert!(dir.path().join("small").exists());
+    }
+
+    #[test]
+    fn dry_run_never_executes_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let sentinel = dir.path().join("ran");
+        let mut it = item(dir.path(), CleanMode::Contents);
+        it.command = Some(format!("touch {}", sentinel.display()));
+
+        clean_item(&mut it, true).unwrap();
+
+        assert_eq!(it.status, ItemStatus::DryRun);
+        assert!(!sentinel.exists());
+    }
+
+    #[test]
+    fn failing_command_reports_exit_code_and_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut it = item(dir.path(), CleanMode::Contents);
+        it.command = Some("echo boom >&2; exit 3".into());
+
+        assert!(clean_item(&mut it, false).is_err());
+
+        match &it.status {
+            ItemStatus::Failed(reason) => {
+                assert!(reason.contains("exit code 3"), "{reason}");
+                assert!(reason.contains("boom"), "{reason}");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
 
     #[test]
     fn remove_contents_with_keep_days_spares_fresh_entries() {
@@ -148,6 +239,7 @@ mod tests {
             mode,
             keep_days: None,
             locked: false,
+            command: None,
         }
     }
 
@@ -163,7 +255,8 @@ mod tests {
             events[1],
             CleanEvent::Finished {
                 idx: 7,
-                status: ItemStatus::Deleted
+                status: ItemStatus::Deleted,
+                ..
             }
         ));
         assert!(matches!(events[2], CleanEvent::Done));
@@ -180,7 +273,8 @@ mod tests {
             events[1],
             CleanEvent::Finished {
                 idx: 0,
-                status: ItemStatus::DryRun
+                status: ItemStatus::DryRun,
+                ..
             }
         ));
         assert!(dir.path().join("a").exists());

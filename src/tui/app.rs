@@ -194,8 +194,11 @@ impl App {
 
     // --- Cleaning -------------------------------------------------------
 
-    pub fn apply_clean_result(&mut self, idx: usize, status: ItemStatus) {
+    pub fn apply_clean_result(&mut self, idx: usize, status: ItemStatus, freed: u64) {
         if let Some(item) = self.items.get_mut(idx) {
+            if status == ItemStatus::Deleted {
+                item.size_bytes = freed;
+            }
             item.status = status;
         }
     }
@@ -505,6 +508,16 @@ mod tests {
     use crate::core::{CleanMode, ItemStatus};
     use std::path::PathBuf;
 
+    #[test]
+    fn apply_clean_result_records_freed_bytes_for_deleted_items() {
+        let mut app = App::new();
+        app.set_items(vec![item("a", "A", 100), item("b", "B", 50)]);
+        app.apply_clean_result(0, ItemStatus::Deleted, 30);
+        app.apply_clean_result(1, ItemStatus::Failed("x".into()), 0);
+        assert_eq!(app.items[0].size_bytes, 30);
+        assert_eq!(app.items[1].size_bytes, 50, "failed items keep their size");
+    }
+
     fn item(name: &str, cat: &str, size: u64) -> CleanupItem {
         CleanupItem {
             group_id: String::new(),
@@ -519,6 +532,7 @@ mod tests {
             mode: CleanMode::Contents,
             keep_days: None,
             locked: false,
+            command: None,
         }
     }
 
@@ -724,8 +738,8 @@ mod tests {
         b.selected = true;
         let c = item("c", "A", 99);
         app.set_items(vec![a, b, c]);
-        app.apply_clean_result(0, ItemStatus::Deleted);
-        app.apply_clean_result(1, ItemStatus::Failed("denied".into()));
+        app.apply_clean_result(0, ItemStatus::Deleted, 10);
+        app.apply_clean_result(1, ItemStatus::Failed("denied".into()), 0);
         let s = app.build_summary();
         assert_eq!(s.deleted, 1);
         assert_eq!(s.freed_bytes, 10);
@@ -739,7 +753,7 @@ mod tests {
         let mut a = item("a", "A", 10);
         a.selected = true;
         app.set_items(vec![a]);
-        app.apply_clean_result(0, ItemStatus::DryRun);
+        app.apply_clean_result(0, ItemStatus::DryRun, 0);
         let s = app.build_summary();
         assert_eq!(s.deleted, 1);
         assert_eq!(s.freed_bytes, 10);

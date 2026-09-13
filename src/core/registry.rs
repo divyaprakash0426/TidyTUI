@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use bytesize::ByteSize;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Rule {
@@ -18,6 +18,10 @@ pub struct Rule {
     /// Hide the item unless it is at least this large (e.g. `10 MiB`).
     #[serde(default)]
     pub min_size: Option<ByteSize>,
+    /// Run this shell command to clean instead of deleting `path`. `path` is
+    /// still what gets measured. Skipped when the program is not installed.
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 fn default_category() -> String {
@@ -50,6 +54,7 @@ pub struct Target {
     pub mode: CleanMode,
     pub keep_days: Option<u64>,
     pub min_size: Option<ByteSize>,
+    pub command: Option<String>,
 }
 
 pub fn parse_definitions(yaml: &str) -> Result<Definitions> {
@@ -68,18 +73,23 @@ pub fn load_definitions_from(explicit: Option<&Path>) -> Result<Definitions> {
     }
 }
 
-pub fn load_definitions() -> Result<Definitions> {
-    let mut paths = vec![
-        Path::new("definitions.yaml").to_path_buf(),
-        Path::new("/usr/share/tidytui/definitions.yaml").to_path_buf(),
-    ];
+/// The definitions shipped with this build; used when no config file exists.
+pub const BUILTIN_DEFINITIONS: &str = include_str!("../../definitions.yaml");
 
+/// Candidate config files, most specific first. The current directory is
+/// deliberately *not* searched: rules may carry shell commands, so only
+/// files the user placed (or named with `--config`) are trusted.
+pub fn search_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
     if let Some(config_dir) = dirs::config_dir() {
-        paths.insert(1, config_dir.join("tidytui").join("definitions.yaml"));
+        paths.push(config_dir.join("tidytui").join("definitions.yaml"));
     }
+    paths.push(PathBuf::from("/usr/share/tidytui/definitions.yaml"));
+    paths
+}
 
-    // Try to find the first path that exists
-    for path in paths {
+pub fn load_definitions() -> Result<Definitions> {
+    for path in search_paths() {
         if path.exists() {
             let content =
                 fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
@@ -87,11 +97,7 @@ pub fn load_definitions() -> Result<Definitions> {
                 .with_context(|| format!("parsing {}", path.display()));
         }
     }
-
-    Err(anyhow::anyhow!(
-        "definitions.yaml not found. Searched: ./definitions.yaml, \
-         ~/.config/tidytui/definitions.yaml, /usr/share/tidytui/definitions.yaml"
-    ))
+    parse_definitions(BUILTIN_DEFINITIONS).context("parsing built-in definitions")
 }
 
 pub fn os_id(os_type: &OsType) -> &'static str {
@@ -124,6 +130,7 @@ pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<Target> 
                     mode: rule.mode,
                     keep_days: rule.keep_days,
                     min_size: rule.min_size,
+                    command: rule.command.clone(),
                 })
         })
         .collect()
@@ -132,6 +139,32 @@ pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<Target> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_definitions_parse_and_cwd_is_never_searched() {
+        let defs = parse_definitions(BUILTIN_DEFINITIONS).unwrap();
+        assert!(!defs.groups.is_empty());
+        assert!(search_paths().iter().all(|p| p.is_absolute()));
+    }
+
+    #[test]
+    fn rules_parse_optional_command() {
+        let yaml = r#"
+groups:
+  - id: pkg
+    name: Pkg
+    rules:
+      - os: arch
+        path: /var/cache/pacman/pkg/
+        command: paccache -rk2
+      - os: any
+        path: ~/x
+"#;
+        let defs = parse_definitions(yaml).unwrap();
+        let targets = filter_rules(&defs, &OsType::Arch);
+        assert_eq!(targets[0].command.as_deref(), Some("paccache -rk2"));
+        assert_eq!(targets[1].command, None);
+    }
 
     #[test]
     fn rules_parse_keep_days_and_min_size() {

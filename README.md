@@ -133,11 +133,17 @@ deleted (or would be, in dry-run), how much space was freed, and any failures.
 
 ## ⚙️ Configuration
 
-TidyTUI looks for `definitions.yaml` in the following locations (in order):
+TidyTUI works out of the box: the rules from this repository's
+`definitions.yaml` are compiled into the binary. To customise them, copy that
+file to one of the locations below (checked in order):
 
-1. **Current Directory**: Useful for local development or portable use.
-2. **XDG Config**: `~/.config/tidytui/definitions.yaml` (Recommended for `cargo` or manual installs).
-3. **System Wide**: `/usr/share/tidytui/definitions.yaml` (Used by `.deb`, `.rpm`, or AUR packages).
+1. **`--config <FILE>`**: an explicit file, e.g. `tidytui -c ./definitions.yaml`.
+2. **XDG Config**: `~/.config/tidytui/definitions.yaml`.
+3. **System Wide**: `/usr/share/tidytui/definitions.yaml` (installed by the `.deb`, `.rpm` and AUR packages).
+4. **Built-in**: the defaults compiled into the binary.
+
+The current directory is intentionally *not* searched, because rules can run
+shell commands (see `command` below).
 
 **Example `definitions.yaml`:**
 
@@ -167,6 +173,14 @@ groups:
         path: "~/.local/share/Trash"
         keep_days: 30               # optional — only entries older than 30 days
         min_size: "10 MiB"          # optional — hide the item when smaller
+
+  - id: "pnpm_store"
+    name: "PNPM Store"
+    category: "Developer Tools"
+    rules:
+      - os: "any"
+        path: "~/.local/share/pnpm/store"
+        command: "pnpm store prune" # optional — run this instead of deleting
 ```
 
 | Field | Meaning |
@@ -177,6 +191,11 @@ groups:
 | `category` | Optional heading used to group items in the Results tab. Defaults to `Other`. |
 | `keep_days` | Optional. Only entries whose contents were all last modified at least this many days ago are counted and removed (top-level entries for `contents`, the target itself for `dir`/files). A folder holding a single fresh file is kept whole. |
 | `min_size` | Optional. Hide the item unless it is at least this large, e.g. `"10 MiB"` or `"500 KB"`. |
+| `command` | Optional. Clean by running this shell command (`sh -c`) instead of deleting; `path` is still what gets measured and re-measured afterwards to report the real space freed. The rule is skipped when the program is not installed. Dry-run shows `would run`. Shipped examples: `paccache -rk2`, `apt-get clean`, `pnpm store prune`, `journalctl --vacuum-time=2weeks`. |
+
+Locations the current user cannot modify (for example `/var/cache/pacman/pkg`)
+are marked **needs root** in the Results tab and in `--list`; re-run with `sudo`
+to clean them.
 
 ## 🏗️ Technical Stack
 

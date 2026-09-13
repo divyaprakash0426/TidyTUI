@@ -7,6 +7,17 @@ pub fn expand_tilde(raw: &str, home: Option<&Path>) -> PathBuf {
     }
 }
 
+/// Whether `program` (a bare name or an absolute path) is installed.
+pub fn program_on_path(program: &str) -> bool {
+    let candidate = Path::new(program);
+    if candidate.is_absolute() {
+        return candidate.is_file();
+    }
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
+        .unwrap_or(false)
+}
+
 pub fn shorten_home(path: &Path, home: Option<&Path>) -> String {
     if let Some(home) = home {
         if let Ok(rest) = path.strip_prefix(home) {
@@ -24,6 +35,13 @@ pub fn shorten_home(path: &Path, home: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn program_on_path_finds_sh_but_not_nonsense() {
+        assert!(program_on_path("sh"));
+        assert!(program_on_path("/bin/sh"));
+        assert!(!program_on_path("definitely-not-a-program-xyz"));
+    }
 
     #[test]
     fn expands_bare_tilde() {

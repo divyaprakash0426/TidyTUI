@@ -305,6 +305,7 @@ mod tests {
             mode: CleanMode::Contents,
             keep_days: None,
             locked: false,
+            command: None,
         }
     }
 

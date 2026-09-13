@@ -65,7 +65,7 @@ impl Runtime {
         let mut done = false;
         loop {
             match rx.try_recv() {
-                Ok(ScanEvent::Found(item)) => app.push_item(item),
+                Ok(ScanEvent::Found(item)) => app.push_item(*item),
                 Ok(ScanEvent::Missing) => app.note_missing(),
                 Ok(ScanEvent::Finished) | Err(TryRecvError::Disconnected) => {
                     done = true;
@@ -97,7 +97,9 @@ impl Runtime {
                         *item_name = name;
                     }
                 }
-                Ok(CleanEvent::Finished { idx, status }) => app.apply_clean_result(idx, status),
+                Ok(CleanEvent::Finished { idx, status, freed }) => {
+                    app.apply_clean_result(idx, status, freed)
+                }
                 Ok(CleanEvent::Done) | Err(TryRecvError::Disconnected) => {
                     done = true;
                     break;

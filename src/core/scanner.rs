@@ -1,4 +1,4 @@
-use crate::core::paths::expand_tilde;
+use crate::core::paths::{expand_tilde, program_on_path};
 use crate::core::registry::Target;
 use crate::core::{perms, policy};
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 /// Progress messages from a background scan. Exactly one `Finished` is sent last.
 #[derive(Debug)]
 pub enum ScanEvent {
-    Found(CleanupItem),
+    Found(Box<CleanupItem>),
     /// A target path did not exist; counts toward progress but yields no item.
     Missing,
     Finished,
@@ -61,6 +61,12 @@ pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
     if !path.exists() {
         return None;
     }
+    if let Some(cmd) = &target.command {
+        let program = cmd.split_whitespace().next()?;
+        if !program_on_path(program) {
+            return None;
+        }
+    }
     let result = measure(&path, target.mode, target.keep_days)?;
     if let Some(min) = target.min_size {
         if result.size_bytes < min.as_u64() {
@@ -81,6 +87,7 @@ pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
         mode: target.mode,
         keep_days: target.keep_days,
         locked,
+        command: target.command,
     })
 }
 
@@ -92,7 +99,7 @@ pub fn spawn_scan(targets: Vec<Target>) -> Receiver<ScanEvent> {
         let home = dirs::home_dir();
         targets.into_par_iter().for_each_with(tx.clone(), |tx, t| {
             let event = match scan_target(t, home.as_deref()) {
-                Some(item) => ScanEvent::Found(item),
+                Some(item) => ScanEvent::Found(Box::new(item)),
                 None => ScanEvent::Missing,
             };
             // Receiver gone means the UI quit; nothing left to do.
@@ -108,7 +115,7 @@ pub fn scan_targets(targets: Vec<Target>) -> Vec<CleanupItem> {
     spawn_scan(targets)
         .into_iter()
         .filter_map(|ev| match ev {
-            ScanEvent::Found(item) => Some(item),
+            ScanEvent::Found(item) => Some(*item),
             _ => None,
         })
         .collect()
@@ -183,6 +190,18 @@ mod tests {
     }
 
     #[test]
+    fn command_rule_is_skipped_when_its_program_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("f"), b"x").unwrap();
+        let mut t = target(dir.path().to_str().unwrap(), CleanMode::Contents);
+        t.command = Some("definitely-not-a-program-xyz --flag".into());
+        assert!(scan_target(t.clone(), None).is_none());
+        t.command = Some("true".into());
+        let item = scan_target(t, None).unwrap();
+        assert_eq!(item.command.as_deref(), Some("true"));
+    }
+
+    #[test]
     fn min_size_drops_small_items() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("f"), vec![0u8; 10]).unwrap();
@@ -203,6 +222,7 @@ mod tests {
             mode,
             keep_days: None,
             min_size: None,
+            command: None,
         }
     }
 

@@ -129,6 +129,7 @@ mod tests {
             mode: CleanMode::Contents,
             keep_days: None,
             locked: false,
+            command: None,
         }]);
         app
     }
@@ -264,6 +265,7 @@ mod tests {
             mode: CleanMode::Contents,
             keep_days: None,
             locked: false,
+            command: None,
         });
         handle_key(&mut app, key(KeyCode::Enter));
         assert_eq!(app.app_state, AppState::Viewing);
