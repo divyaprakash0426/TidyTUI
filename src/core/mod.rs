@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod cleaner;
 pub mod discovery;
+pub mod disk;
 pub mod paths;
 pub mod policy;
 pub mod registry;

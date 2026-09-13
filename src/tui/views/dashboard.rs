@@ -1,10 +1,11 @@
+use crate::core::disk::{self, DiskUsage};
 use crate::tui::app::App;
 use bytesize::ByteSize;
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Margin, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Padding, Paragraph},
+    widgets::{Block, Borders, Gauge, Padding, Paragraph},
     Frame,
 };
 use std::collections::HashMap;
@@ -18,178 +19,356 @@ const PALETTE: [Color; 6] = [
     Color::Red,
 ];
 
+const TOP_ITEMS: usize = 5;
+
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::default()
+    // Home holds most junk; fall back to / for machines without a home dir.
+    let probe = dirs::home_dir().unwrap_or_else(|| "/".into());
+    render_with_disk(f, app, area, disk::usage(&probe));
+}
+
+pub fn render_with_disk(f: &mut Frame, app: &App, area: Rect, disk: Option<DiskUsage>) {
+    let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Min(0)])
+        .constraints([Constraint::Length(7), Constraint::Min(0)])
         .margin(1)
         .split(area);
 
-    render_overview(f, app, chunks[0]);
-
-    let sub_chunks = Layout::default()
+    let top = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-        .split(chunks[1]);
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[0]);
+    render_overview(f, app, top[0]);
+    render_disk(f, app, disk, top[1]);
 
-    render_gauge(f, app, sub_chunks[0]);
-    render_distribution(f, app, sub_chunks[1]);
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(rows[1]);
+    render_distribution(f, app, bottom[0]);
+    render_largest(f, app, bottom[1]);
+}
+
+fn bold(color: Color) -> Style {
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
 fn render_overview(f: &mut Frame, app: &App, area: Rect) {
     let total_files: u64 = app.items.iter().map(|i| i.file_count).sum();
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" System Overview ")
-        .padding(Padding::uniform(1));
-
-    let stats_text = vec![
+    let mut lines = vec![
         Line::from(vec![
-            Span::raw("Discovered: "),
+            Span::raw("Locations  "),
+            Span::styled(app.items.len().to_string(), bold(Color::Cyan)),
             Span::styled(
-                format!("{} locations", app.items.len()),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!(" ({total_files} files)")),
-        ]),
-        Line::from(vec![
-            Span::raw("Total Size: "),
-            Span::styled(
-                ByteSize(app.total_size).to_string(),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
+                format!("  ({total_files} files)"),
+                Style::default().fg(Color::DarkGray),
             ),
         ]),
-        Line::from(""),
         Line::from(vec![
-            Span::raw("Selected for cleaning: "),
+            Span::raw("Junk found "),
+            Span::styled(ByteSize(app.total_size).to_string(), bold(Color::Magenta)),
+        ]),
+        Line::from(vec![
+            Span::raw("Selected   "),
             Span::styled(
                 format!("{} items", app.selected_count()),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                bold(Color::Yellow),
             ),
-            Span::raw(format!(" / {}", ByteSize(app.selected_size()))),
+            Span::raw(format!("  {}", ByteSize(app.selected_size()))),
         ]),
     ];
+    if app.is_scanning() {
+        lines.push(Line::from(Span::styled(
+            format!("⟳ Scanning {}/{}", app.scan.checked, app.scan.total),
+            Style::default().fg(Color::Yellow),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Scan complete · press r to rescan",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
 
-    let thresholds_text = vec![
-        Line::from(Span::styled(
-            "Status Thresholds:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(vec![
-            Span::styled("  Clean    ", Style::default().fg(Color::Green)),
-            Span::raw("< 100 MB"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Moderate ", Style::default().fg(Color::Yellow)),
-            Span::raw("100 - 500 MB"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Critical ", Style::default().fg(Color::Red)),
-            Span::raw("> 500 MB"),
-        ]),
-    ];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Overview ")
+        .padding(Padding::horizontal(1));
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
 
-    let header_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        }));
+/// Junk relative to the disk (when known) decides the verdict; the absolute
+/// thresholds are only a fallback for exotic filesystems.
+fn verdict(total_junk: u64, disk: Option<DiskUsage>) -> (Color, &'static str, String) {
+    match disk {
+        Some(d) => {
+            let frac = d.fraction_of_total(total_junk);
+            let (color, label) = if frac < 0.01 {
+                (Color::Green, "Clean")
+            } else if frac < 0.05 {
+                (Color::Yellow, "Moderate")
+            } else {
+                (Color::Red, "Critical")
+            };
+            (color, label, format!("{:.1}% of disk", frac * 100.0))
+        }
+        None => {
+            let (color, label) = if total_junk < 100_000_000 {
+                (Color::Green, "Clean")
+            } else if total_junk < 500_000_000 {
+                (Color::Yellow, "Moderate")
+            } else {
+                (Color::Red, "Critical")
+            };
+            (color, label, String::new())
+        }
+    }
+}
 
+fn render_disk(f: &mut Frame, app: &App, disk: Option<DiskUsage>, area: Rect) {
+    let (color, label, relative) = verdict(app.total_size, disk);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Disk · {label} "))
+        .border_style(Style::default().fg(color))
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(area);
     f.render_widget(block, area);
-    f.render_widget(Paragraph::new(stats_text), header_chunks[0]);
-    f.render_widget(Paragraph::new(thresholds_text), header_chunks[1]);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(inner);
+
+    match disk {
+        Some(d) => {
+            let used_pct = (d.used_fraction() * 100.0).round().clamp(0.0, 100.0) as u16;
+            let gauge = Gauge::default()
+                .gauge_style(Style::default().fg(Color::Blue).bg(Color::Black))
+                .percent(used_pct)
+                .label(format!(
+                    "{used_pct}% used · {} / {}",
+                    ByteSize(d.used),
+                    ByteSize(d.total)
+                ));
+            f.render_widget(gauge, rows[0]);
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::raw("Reclaimable "),
+                    Span::styled(ByteSize(app.total_size).to_string(), bold(Color::Magenta)),
+                    Span::styled(format!("  ({relative})"), Style::default().fg(color)),
+                ])),
+                rows[2],
+            );
+        }
+        None => {
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::raw("Reclaimable "),
+                    Span::styled(ByteSize(app.total_size).to_string(), bold(Color::Magenta)),
+                ])),
+                rows[0],
+            );
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "Disk capacity unavailable · thresholds: <100 MB clean, <500 MB moderate",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                rows[2],
+            );
+        }
+    }
 }
 
 fn render_distribution(f: &mut Frame, app: &App, area: Rect) {
-    let mut distribution: HashMap<&str, u64> = HashMap::new();
+    let mut by_cat: HashMap<&str, u64> = HashMap::new();
     for item in &app.items {
-        *distribution.entry(item.category.as_str()).or_insert(0) += item.size_bytes;
+        *by_cat.entry(item.category.as_str()).or_insert(0) += item.size_bytes;
     }
-
-    let mut data: Vec<(&str, u64)> = distribution.into_iter().collect();
+    let mut data: Vec<(&str, u64)> = by_cat.into_iter().collect();
     data.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
 
-    let legend_items: Vec<ListItem> = data
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Junk by Category ")
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let label_w = 18usize;
+    let pct_w = 7usize;
+    let size_w = 11usize;
+    let bar_w = (inner.width as usize)
+        .saturating_sub(label_w + pct_w + size_w + 3)
+        .max(4);
+    let max = data.first().map(|d| d.1).unwrap_or(0).max(1);
+
+    let lines: Vec<Line> = data
         .iter()
         .enumerate()
         .map(|(idx, (cat, size))| {
-            let percentage = if app.total_size > 0 {
-                (*size as f64 / app.total_size as f64) * 100.0
+            let color = PALETTE[idx % PALETTE.len()];
+            let pct = if app.total_size > 0 {
+                *size as f64 / app.total_size as f64 * 100.0
             } else {
                 0.0
             };
-            let perc_str = if percentage > 0.0 && percentage < 0.1 {
-                "< 0.1%".to_string()
+            let filled = ((*size as f64 / max as f64) * bar_w as f64).round() as usize;
+            let filled = filled.clamp(usize::from(*size > 0), bar_w);
+            let pct_str = if pct > 0.0 && pct < 0.1 {
+                "<0.1%".to_string()
             } else {
-                format!("{percentage:>5.1}%")
+                format!("{pct:.1}%")
             };
-            let color = PALETTE[idx % PALETTE.len()];
-            ListItem::new(Line::from(vec![
-                Span::styled(" ● ", Style::default().fg(color)),
+            Line::from(vec![
+                Span::styled(format!("{:<label_w$}", truncate(cat, label_w)), bold(color)),
+                Span::styled("█".repeat(filled), Style::default().fg(color)),
                 Span::styled(
-                    format!("{cat:<18}"),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(" {perc_str} ")),
-                Span::styled(
-                    format!("({})", ByteSize(*size)),
+                    "░".repeat(bar_w - filled),
                     Style::default().fg(Color::DarkGray),
                 ),
-            ]))
+                Span::raw(format!(" {pct_str:>6}")),
+                Span::styled(
+                    format!(" {:>10}", ByteSize(*size).to_string()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
         })
         .collect();
 
-    let legend = List::new(legend_items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Junk Distribution "),
-    );
-    f.render_widget(
-        legend,
-        area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        }),
-    );
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_gauge(f: &mut Frame, app: &App, area: Rect) {
-    // 100 MB is 'Clean', 500 MB is 'Moderate', 1 GB+ pins the gauge at 100%.
-    let junk_score = (app.total_size as f64 / 1_000_000_000.0).min(1.0);
-    let percentage = (junk_score * 100.0) as u16;
+fn render_largest(f: &mut Frame, app: &App, area: Rect) {
+    let mut items: Vec<_> = app.items.iter().collect();
+    items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
 
-    let (color, status) = if junk_score < 0.1 {
-        (Color::Green, "Clean")
-    } else if junk_score < 0.5 {
-        (Color::Yellow, "Moderate")
+    let lines: Vec<Line> = items
+        .iter()
+        .take(TOP_ITEMS)
+        .enumerate()
+        .map(|(n, item)| {
+            Line::from(vec![
+                Span::styled(format!("{}. ", n + 1), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:<24}", truncate(&item.name, 24)),
+                    bold(Color::White),
+                ),
+                Span::styled(
+                    format!("{:>10}", ByteSize(item.size_bytes).to_string()),
+                    Style::default().fg(Color::Magenta),
+                ),
+            ])
+        })
+        .collect();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Largest Items ")
+        .padding(Padding::horizontal(1));
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
     } else {
-        (Color::Red, "Critical")
-    };
+        let head: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
+}
 
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" System Status: {status} ")),
-        )
-        .gauge_style(Style::default().fg(color).bg(Color::Black))
-        .percent(percentage)
-        .label(format!("{percentage}% Cluttered"));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::disk::DiskUsage;
+    use crate::core::{CleanMode, CleanupItem, ItemStatus};
+    use crate::tui::views::test_util::render_to_string;
+    use std::path::PathBuf;
 
-    f.render_widget(
-        gauge,
-        area.inner(Margin {
-            horizontal: 1,
-            vertical: 1,
-        }),
-    );
+    fn item(name: &str, cat: &str, size: u64) -> CleanupItem {
+        CleanupItem {
+            group_id: String::new(),
+            name: name.into(),
+            category: cat.into(),
+            description: None,
+            path: PathBuf::from("/x"),
+            size_bytes: size,
+            file_count: 1,
+            selected: false,
+            status: ItemStatus::Scanned,
+            mode: CleanMode::Contents,
+            keep_days: None,
+        }
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.set_items(vec![
+            item("Big", "System", 800),
+            item("Mid", "Dev", 150),
+            item("Small", "Dev", 50),
+        ]);
+        app
+    }
+
+    fn render(app: &App, disk: Option<DiskUsage>) -> String {
+        render_to_string(140, 40, |f| render_with_disk(f, app, f.area(), disk))
+    }
+
+    #[test]
+    fn distribution_shows_bars_sorted_by_size_with_percentages() {
+        let s = render(&app(), None);
+        let sys = s.find("System").unwrap();
+        let dev = s.find("Dev").unwrap();
+        assert!(sys < dev, "largest category first:\n{s}");
+        assert!(s.contains("80.0%"), "{s}");
+        assert!(s.contains("20.0%"), "{s}");
+        assert!(s.contains("█"), "{s}");
+    }
+
+    #[test]
+    fn largest_items_panel_lists_top_items_by_size() {
+        let s = render(&app(), None);
+        assert!(s.contains("Largest"), "{s}");
+        let big = s.find("Big").unwrap();
+        let mid = s.find("Mid").unwrap();
+        let small = s.find("Small").unwrap();
+        assert!(big < mid && mid < small, "{s}");
+    }
+
+    #[test]
+    fn gauge_is_disk_relative_when_disk_info_is_available() {
+        let disk = DiskUsage {
+            total: 100_000,
+            used: 40_000,
+        };
+        let s = render(&app(), Some(disk));
+        assert!(s.contains("Disk"), "{s}");
+        assert!(s.contains("40%"), "{s}");
+        assert!(s.contains("Reclaimable"), "{s}");
+        assert!(s.contains("1.0% of disk"), "{s}");
+        assert!(s.contains("Moderate"), "{s}");
+    }
+
+    #[test]
+    fn gauge_falls_back_to_absolute_thresholds_without_disk_info() {
+        let s = render(&app(), None);
+        assert!(s.contains("Clean"), "{s}");
+        assert!(!s.contains("of disk"), "{s}");
+    }
+
+    #[test]
+    fn overview_shows_scan_progress_while_scanning() {
+        let mut app = app();
+        app.begin_scan(9);
+        app.note_missing();
+        let s = render(&app, None);
+        assert!(s.contains("Scanning 1/9"), "{s}");
+    }
 }
