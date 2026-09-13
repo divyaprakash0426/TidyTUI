@@ -91,6 +91,8 @@ pub struct App {
     pub sort: SortMode,
     /// Categories whose items are hidden in the results list.
     pub collapsed: HashSet<String>,
+    /// Group ids from `--select`; matching items are selected as they arrive.
+    pub preselect_groups: Vec<String>,
 }
 
 impl App {
@@ -111,11 +113,25 @@ impl App {
             filter: String::new(),
             sort: SortMode::default(),
             collapsed: HashSet::new(),
+            preselect_groups: Vec::new(),
+        }
+    }
+
+    /// Selects every item whose group id was requested on the command line.
+    pub fn apply_preselection(&mut self) {
+        if self.preselect_groups.is_empty() {
+            return;
+        }
+        for item in &mut self.items {
+            if self.preselect_groups.contains(&item.group_id) {
+                item.selected = true;
+            }
         }
     }
 
     pub fn set_items(&mut self, items: Vec<CleanupItem>) {
         self.items = items;
+        self.apply_preselection();
         self.total_size = self.items.iter().map(|i| i.size_bytes).sum();
         self.calculate_rendered_rows();
         self.state.select(Some(0));
@@ -140,8 +156,11 @@ impl App {
     /// Adds an item from an in-progress scan, keeping the highlight on the
     /// same item even though category sorting may shift the rows. Appending
     /// never moves existing indices, so the item index is a stable identity.
-    pub fn push_item(&mut self, item: CleanupItem) {
+    pub fn push_item(&mut self, mut item: CleanupItem) {
         let keep = self.selected_index();
+        if self.preselect_groups.contains(&item.group_id) {
+            item.selected = true;
+        }
         self.total_size += item.size_bytes;
         self.items.push(item);
         self.scan.checked += 1;
@@ -541,6 +560,27 @@ mod tests {
         assert_eq!(app.selected_count(), 2);
         app.toggle_selection();
         assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn preselect_marks_only_matching_groups() {
+        let mut app = App::new();
+        let mut a = item("a", "A", 1);
+        a.group_id = "dev_pip".into();
+        let mut b = item("b", "A", 1);
+        b.group_id = "user_trash".into();
+        app.preselect_groups = vec!["user_trash".into()];
+        app.set_items(vec![a.clone(), b.clone()]);
+        assert!(!app.items[0].selected);
+        assert!(app.items[1].selected);
+
+        let mut app = App::new();
+        app.preselect_groups = vec!["user_trash".into()];
+        app.begin_scan(2);
+        app.push_item(a);
+        app.push_item(b);
+        assert!(!app.items[0].selected);
+        assert!(app.items[1].selected, "streamed items are preselected too");
     }
 
     #[test]

@@ -56,6 +56,18 @@ pub fn parse_definitions(yaml: &str) -> Result<Definitions> {
     Ok(serde_yaml::from_str(yaml)?)
 }
 
+/// Loads an explicit file when given, otherwise searches the default locations.
+pub fn load_definitions_from(explicit: Option<&Path>) -> Result<Definitions> {
+    match explicit {
+        Some(path) => {
+            let content =
+                fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+            parse_definitions(&content).with_context(|| format!("parsing {}", path.display()))
+        }
+        None => load_definitions(),
+    }
+}
+
 pub fn load_definitions() -> Result<Definitions> {
     let mut paths = vec![
         Path::new("definitions.yaml").to_path_buf(),

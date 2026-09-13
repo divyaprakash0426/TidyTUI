@@ -106,7 +106,6 @@ pub fn spawn_scan(targets: Vec<Target>) -> Receiver<ScanEvent> {
 }
 
 /// Blocking scan: collects everything `spawn_scan` finds.
-#[cfg_attr(not(test), allow(dead_code))] // used by the CLI in a later phase
 pub fn scan_targets(targets: Vec<Target>) -> Vec<CleanupItem> {
     spawn_scan(targets)
         .into_iter()

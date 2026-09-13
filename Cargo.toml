@@ -13,12 +13,14 @@ categories = ["command-line-utilities", "filesystem"]
 [dependencies]
 anyhow = "1.0.100"
 bytesize = { version = "2.3.1", features = ["serde"] }
+clap = { version = "4.6.6", features = ["derive"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
 os-release = "0.1.0"
 ratatui = "0.29.0"
 rayon = "1.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
 serde_yaml = "0.9.34"
 thiserror = "2.0.18"
 walkdir = "2.5.0"

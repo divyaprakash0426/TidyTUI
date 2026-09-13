@@ -1,4 +1,6 @@
+mod cli;
 mod core;
+mod headless;
 mod tui;
 
 use std::{
@@ -10,6 +12,7 @@ use std::{
 use crossterm::event::{self, Event};
 use ratatui::{backend::Backend, Terminal};
 
+use crate::cli::Cli;
 use crate::core::{
     cleaner::{self, CleanEvent},
     discovery, registry,
@@ -21,6 +24,7 @@ use crate::tui::{
     events::{handle_key, Action},
     views,
 };
+use clap::Parser;
 
 /// Background work the event loop pumps every frame.
 #[derive(Default)]
@@ -110,13 +114,22 @@ impl Runtime {
 }
 
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
     // Load config before touching the terminal so that errors print normally
     // instead of inside raw mode.
     let os_type = discovery::detect_os();
-    let definitions = registry::load_definitions()?;
+    let definitions = registry::load_definitions_from(cli.config.as_deref())?;
+    let targets = registry::filter_rules(&definitions, &os_type);
+
+    if cli.list || cli.yes {
+        return run_headless(&cli, targets);
+    }
 
     let mut app = App::new();
-    app.targets = registry::filter_rules(&definitions, &os_type);
+    app.dry_run = cli.dry_run();
+    app.preselect_groups = cli.select.clone();
+    app.targets = targets;
 
     let mut runtime = Runtime::default();
     runtime.start_scan(&mut app);
@@ -126,6 +139,41 @@ fn main() -> anyhow::Result<()> {
     let result = run_app(&mut terminal, &mut app, &mut runtime);
     ratatui::restore();
     Ok(result?)
+}
+
+/// `--list [--json]` prints the scan; `--yes` cleans the selected groups.
+fn run_headless(cli: &Cli, targets: Vec<registry::Target>) -> anyhow::Result<()> {
+    let home = dirs::home_dir();
+    let mut items = scanner::scan_targets(targets);
+    items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+
+    if !cli.select.is_empty() {
+        let (kept, unknown) = headless::select_groups(items, &cli.select);
+        for id in &unknown {
+            eprintln!("warning: no scanned item belongs to group '{id}'");
+        }
+        items = kept;
+    }
+
+    if cli.yes {
+        let dry_run = cli.dry_run();
+        if items.is_empty() {
+            anyhow::bail!("nothing to clean for the selected groups");
+        }
+        let report = headless::clean_all(&mut items, dry_run);
+        print!("{}", report.render(home.as_deref(), &items));
+        if !report.failed.is_empty() {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    if cli.json {
+        println!("{}", headless::list_json(&items));
+    } else {
+        print!("{}", headless::list_table(&items, home.as_deref()));
+    }
+    Ok(())
 }
 
 fn run_app<B: Backend>(
