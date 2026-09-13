@@ -109,8 +109,10 @@ fn run_command(item: &mut CleanupItem, cmd: &str) -> Result<()> {
             .unwrap_or_else(|| "killed by signal".to_string());
         anyhow::bail!("`{cmd}` failed ({code}) {last}");
     }
+    // Re-measure exactly as the scanner did (same mode and age filter), so
+    // fresh content the rule never targeted cannot mask what was freed.
     let after = if item.path.exists() {
-        scanner::scan_path(&item.path).size_bytes
+        scanner::measure(&item.path, item.mode, item.keep_days).map_or(0, |r| r.size_bytes)
     } else {
         0
     };
@@ -170,6 +172,33 @@ mod tests {
         assert_eq!(it.status, ItemStatus::Deleted);
         assert_eq!(it.size_bytes, 100, "freed = before (120) - after (20)");
         assert!(dir.path().join("small").exists());
+    }
+
+    #[test]
+    fn command_with_keep_days_measures_freed_bytes_against_eligible_entries_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old");
+        fs::write(&old, [0u8; 100]).unwrap();
+        fs::write(dir.path().join("fresh"), [0u8; 1000]).unwrap();
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+        let mut it = item(dir.path(), CleanMode::Contents);
+        it.keep_days = Some(30);
+        it.size_bytes = 100; // what the scanner measured: old entries only
+        it.command = Some(format!("rm {}", old.display()));
+
+        clean_item(&mut it, false).unwrap();
+
+        assert_eq!(it.status, ItemStatus::Deleted);
+        assert_eq!(
+            it.size_bytes, 100,
+            "fresh content must not mask what was freed"
+        );
     }
 
     #[test]

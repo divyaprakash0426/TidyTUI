@@ -1,22 +1,54 @@
 use crate::core::paths::shorten_home;
 use crate::tui::app::{App, CleanSummary};
 use crate::tui::theme::Theme;
+use crate::tui::views::text::truncate_right;
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph},
     Frame,
 };
 
 const MAX_PREVIEW_PATHS: usize = 5;
 
-pub fn render_confirm(f: &mut Frame, app: &App) {
+/// How many preview paths fit in `room` text rows, and whether an
+/// "… and N more" line follows. Paths give way before the mode/prompt lines.
+fn fit_preview(selected: usize, room: usize) -> (usize, bool) {
+    let shown = selected.min(MAX_PREVIEW_PATHS);
+    if shown <= room && shown == selected {
+        return (shown, false);
+    }
+    if room == 0 {
+        return (0, false);
+    }
+    let shown = shown.min(room - 1);
+    (shown, shown < selected)
+}
+
+/// Borders plus uniform padding, above and below.
+const MODAL_CHROME_ROWS: usize = 4;
+/// Blank separator rows in the confirm modal, dropped first when short on space.
+const CONFIRM_SPACERS: usize = 3;
+
+pub fn render_confirm(f: &mut Frame, app: &App, area: Rect) {
     let th = app.theme;
     let selected_items = app.selected_count();
     let selected_size = ByteSize(app.selected_size());
     let home = dirs::home_dir();
+    let locked = app.items.iter().filter(|i| i.selected && i.locked).count();
+    let warn_locked = locked > 0 && !app.dry_run;
+
+    // Fit order: heading/mode/prompt (and the root warning) always; then
+    // the path preview; blank separators take whatever is left.
+    let avail = usize::from(area.height).saturating_sub(MODAL_CHROME_ROWS);
+    let essential = 3 + usize::from(warn_locked);
+    let (shown, more) = fit_preview(selected_items, avail.saturating_sub(essential));
+    let used = essential + shown + usize::from(more);
+    let spacers = CONFIRM_SPACERS.min(avail.saturating_sub(used));
+    // Separator priority: after the paths, after the heading, before the prompt.
+    let blank = |slot: usize| (spacers > slot).then(|| Line::from(""));
 
     let block = Block::default()
         .title(" CONFIRM CLEANUP ")
@@ -24,44 +56,36 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
         .border_style(Style::default().fg(th.warn))
         .padding(Padding::uniform(1));
 
-    let mut text = vec![
-        Line::from(vec![
-            Span::raw("Clean "),
-            Span::styled(
-                selected_items.to_string(),
-                Style::default().add_modifier(Modifier::BOLD).fg(th.accent),
-            ),
-            Span::raw(" items, freeing "),
-            Span::styled(
-                selected_size.to_string(),
-                Style::default().add_modifier(Modifier::BOLD).fg(th.size),
-            ),
-            Span::raw("?"),
-        ]),
-        Line::from(""),
-    ];
+    let mut text = vec![Line::from(vec![
+        Span::raw("Clean "),
+        Span::styled(
+            selected_items.to_string(),
+            Style::default().add_modifier(Modifier::BOLD).fg(th.accent),
+        ),
+        Span::raw(" items, freeing "),
+        Span::styled(
+            selected_size.to_string(),
+            Style::default().add_modifier(Modifier::BOLD).fg(th.size),
+        ),
+        Span::raw("?"),
+    ])];
+    text.extend(blank(1));
 
-    for item in app
-        .items
-        .iter()
-        .filter(|i| i.selected)
-        .take(MAX_PREVIEW_PATHS)
-    {
+    for item in app.items.iter().filter(|i| i.selected).take(shown) {
         text.push(Line::from(Span::styled(
             format!("  {}", shorten_home(&item.path, home.as_deref())),
             Style::default().fg(th.dim),
         )));
     }
-    if selected_items > MAX_PREVIEW_PATHS {
+    if more {
         text.push(Line::from(Span::styled(
-            format!("  … and {} more", selected_items - MAX_PREVIEW_PATHS),
+            format!("  … and {} more", selected_items - shown),
             Style::default().fg(th.dim),
         )));
     }
+    text.extend(blank(0));
 
-    text.push(Line::from(""));
-    let locked = app.items.iter().filter(|i| i.selected && i.locked).count();
-    if locked > 0 && !app.dry_run {
+    if warn_locked {
         let noun = if locked == 1 {
             "item needs"
         } else {
@@ -83,7 +107,7 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
             Style::default().fg(th.danger).add_modifier(Modifier::BOLD),
         ))
     });
-    text.push(Line::from(""));
+    text.extend(blank(2));
     text.push(Line::from(vec![
         Span::raw("Press "),
         Span::styled(
@@ -98,9 +122,8 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
         Span::raw(" to cancel."),
     ]));
 
-    // Borders and uniform padding add two rows above and two below the text.
-    let height = text.len() as u16 + 4;
-    let area = centered_fixed_height(70, height, f.area());
+    let height = (text.len() + MODAL_CHROME_ROWS) as u16;
+    let area = centered_fixed_height(70, height, area);
     f.render_widget(Clear, area);
     let paragraph = Paragraph::new(text)
         .block(block)
@@ -110,7 +133,10 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
 
 const MAX_FAILURES_SHOWN: usize = 6;
 
-pub fn render_summary(f: &mut Frame, th: Theme, summary: &CleanSummary) {
+pub fn render_summary(f: &mut Frame, th: Theme, summary: &CleanSummary, area: Rect) {
+    // Width is fixed by the area, so it is known before the text is built;
+    // failure reasons are clipped to one row each instead of wrapping.
+    let inner_width = usize::from(centered_fixed_height(60, 1, area).width).saturating_sub(4);
     let (title, verb, color) = if summary.dry_run {
         (" Dry-Run Complete ", "Would delete", th.accent)
     } else {
@@ -148,9 +174,11 @@ pub fn render_summary(f: &mut Frame, th: Theme, summary: &CleanSummary) {
             Style::default().fg(th.danger).add_modifier(Modifier::BOLD),
         )));
         for (name, reason) in summary.failed.iter().take(MAX_FAILURES_SHOWN) {
+            let label = format!("  {name}: ");
+            let budget = inner_width.saturating_sub(label.chars().count());
             text.push(Line::from(vec![
-                Span::styled(format!("  {name}: "), Style::default().fg(th.danger)),
-                Span::styled(reason.clone(), Style::default().fg(th.dim)),
+                Span::styled(label, Style::default().fg(th.danger)),
+                Span::styled(truncate_right(reason, budget), Style::default().fg(th.dim)),
             ]));
         }
         if summary.failed.len() > MAX_FAILURES_SHOWN {
@@ -176,15 +204,13 @@ pub fn render_summary(f: &mut Frame, th: Theme, summary: &CleanSummary) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(color))
         .padding(Padding::uniform(1));
-    // borders + padding
-    let height = text.len() as u16 + 4;
-    let area = centered_fixed_height(60, height, f.area());
+    let height = (text.len() + MODAL_CHROME_ROWS) as u16;
+    let area = centered_fixed_height(60, height, area);
     f.render_widget(Clear, area);
     f.render_widget(
         Paragraph::new(text)
             .block(block)
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: false }),
+            .alignment(Alignment::Center),
         area,
     );
 }
@@ -265,7 +291,9 @@ mod tests {
             freed_bytes: 2 * 1024 * 1024,
             failed: vec![("Trash".into(), "permission denied".into())],
         };
-        let s = render_to_string(100, 24, |f| render_summary(f, Theme::default(), &summary));
+        let s = render_to_string(100, 24, |f| {
+            render_summary(f, Theme::default(), &summary, f.area())
+        });
         assert!(s.contains("Cleanup Complete"), "{s}");
         assert!(s.contains("Deleted 3 items"), "{s}");
         assert!(s.contains("2.0 MiB"), "{s}");
@@ -300,7 +328,7 @@ mod tests {
                 })
                 .collect(),
         );
-        let s = render_to_string(120, 40, |f| render_confirm(f, &app));
+        let s = render_to_string(120, 40, |f| render_confirm(f, &app, f.area()));
         let lines: Vec<&str> = s.lines().collect();
         let top = lines
             .iter()
@@ -316,6 +344,40 @@ mod tests {
     }
 
     #[test]
+    fn summary_keeps_every_failure_and_the_prompt_on_screen_despite_long_reasons() {
+        let reason = format!(
+            "12 entries could not be removed (first: /var/cache/pacman/pkg/{}: Permission denied (os error 13))",
+            "x".repeat(60)
+        );
+        let summary = CleanSummary {
+            dry_run: false,
+            deleted: 0,
+            freed_bytes: 0,
+            failed: (0..7)
+                .map(|i| (format!("Item{i}"), reason.clone()))
+                .collect(),
+        };
+        let s = render_to_string(100, 40, |f| {
+            render_summary(f, Theme::default(), &summary, f.area())
+        });
+        for i in 0..6 {
+            assert!(s.contains(&format!("Item{i}:")), "Item{i} missing\n{s}");
+        }
+        assert!(s.contains("… and 1 more"), "{s}");
+        assert!(s.contains("Press Enter to continue"), "{s}");
+    }
+
+    #[test]
+    fn fit_preview_trades_paths_for_the_more_line_when_short_on_rows() {
+        assert_eq!(fit_preview(3, 10), (3, false));
+        assert_eq!(fit_preview(7, 10), (5, true));
+        assert_eq!(fit_preview(3, 2), (1, true));
+        assert_eq!(fit_preview(7, 3), (2, true));
+        assert_eq!(fit_preview(3, 0), (0, false));
+        assert_eq!(fit_preview(0, 5), (0, false));
+    }
+
+    #[test]
     fn summary_in_dry_run_says_would_delete() {
         let summary = CleanSummary {
             dry_run: true,
@@ -323,7 +385,9 @@ mod tests {
             freed_bytes: 10,
             failed: vec![],
         };
-        let s = render_to_string(100, 24, |f| render_summary(f, Theme::default(), &summary));
+        let s = render_to_string(100, 24, |f| {
+            render_summary(f, Theme::default(), &summary, f.area())
+        });
         assert!(s.contains("Dry-Run"), "{s}");
         assert!(s.contains("Would delete 2 items"), "{s}");
     }

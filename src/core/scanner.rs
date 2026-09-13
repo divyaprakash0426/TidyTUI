@@ -39,7 +39,7 @@ pub fn scan_path(path: &Path) -> ScanResult {
 /// Measures exactly what cleaning would remove: with `keep_days` on a
 /// contents-mode directory only the old top-level entries are walked; on a
 /// dir-mode directory or a file, a fresh target is not eligible at all.
-fn measure(path: &Path, mode: CleanMode, keep_days: Option<u64>) -> Option<ScanResult> {
+pub(crate) fn measure(path: &Path, mode: CleanMode, keep_days: Option<u64>) -> Option<ScanResult> {
     let now = SystemTime::now();
     match (keep_days, path.is_dir(), mode) {
         (Some(_), true, CleanMode::Contents) => {

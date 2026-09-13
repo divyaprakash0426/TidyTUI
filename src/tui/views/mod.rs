@@ -12,6 +12,7 @@ pub mod dashboard;
 pub mod help;
 pub mod modals;
 pub mod results;
+mod text;
 
 #[cfg(test)]
 pub(crate) mod test_util {
@@ -100,12 +101,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = [tabs, body, footer];
 
     render_tabs(f, app, chunks[0]);
+    // The footer goes down first so a modal can never be painted over.
+    render_footer(f, app, chunks[2]);
 
     match &app.app_state {
         AppState::Viewing | AppState::Filtering => render_active_tab(f, app, chunks[1]),
         AppState::Confirming => {
             render_active_tab(f, app, chunks[1]);
-            modals::render_confirm(f, app);
+            modals::render_confirm(f, app, chunks[1]);
         }
         AppState::Cleaning {
             current,
@@ -118,11 +121,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
         AppState::Summary(summary) => {
             let summary = summary.clone();
             render_active_tab(f, app, chunks[1]);
-            modals::render_summary(f, app.theme, &summary);
+            modals::render_summary(f, app.theme, &summary, chunks[1]);
         }
     }
-
-    render_footer(f, app, chunks[2]);
 }
 
 fn render_active_tab(f: &mut Frame, app: &mut App, area: Rect) {
@@ -327,6 +328,55 @@ mod tests {
         };
         assert_eq!(colour_of(NORD), Some(NORD.size));
         assert_ne!(NORD.size, Theme::default().size);
+    }
+
+    #[test]
+    fn confirm_modal_stays_clear_of_the_footer_on_a_short_terminal() {
+        let mut app = App::new();
+        app.set_items(
+            (0..7)
+                .map(|i| CleanupItem {
+                    group_id: format!("g{i}"),
+                    name: format!("Item{i}"),
+                    category: "Dev".into(),
+                    description: None,
+                    path: PathBuf::from(format!("/x{i}")),
+                    size_bytes: 1,
+                    file_count: 1,
+                    selected: true,
+                    status: ItemStatus::Scanned,
+                    mode: CleanMode::Contents,
+                    keep_days: None,
+                    locked: i == 0,
+                    command: None,
+                })
+                .collect(),
+        );
+        app.dry_run = false;
+        app.app_state = AppState::Confirming;
+        let s = render_to_string(100, 17, |f| render(f, &mut app));
+        let lines: Vec<&str> = s.lines().collect();
+        let prompt = lines
+            .iter()
+            .position(|l| l.contains("to cancel."))
+            .unwrap_or_else(|| panic!("prompt clipped:\n{s}"));
+        let footer_top = lines
+            .iter()
+            .rposition(|l| l.contains("DANGER"))
+            .expect("footer");
+        assert!(
+            prompt < footer_top,
+            "prompt drawn on/after the footer:\n{s}"
+        );
+        assert!(
+            lines[prompt + 1..].iter().any(|l| l.contains('└')),
+            "modal bottom border missing:\n{s}"
+        );
+        assert!(s.contains("WARNING: DANGER MODE"), "{s}");
+        assert!(
+            !lines[footer_top].contains("cancel"),
+            "modal bled into footer:\n{s}"
+        );
     }
 
     #[test]

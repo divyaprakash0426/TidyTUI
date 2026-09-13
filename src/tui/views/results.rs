@@ -2,6 +2,7 @@ use crate::core::paths::shorten_home;
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use crate::tui::app::{App, ResultRow, SortMode};
 use crate::tui::theme::Theme;
+use crate::tui::views::text::{truncate_left, truncate_right};
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -349,31 +350,6 @@ fn item_row<'a>(
     }
 
     ListItem::new(Line::from(spans))
-}
-
-/// Keeps the tail of `s` (the most specific part of a path) within `max`.
-fn truncate_left(s: &str, max: usize) -> String {
-    let n = s.chars().count();
-    if n <= max {
-        return s.to_string();
-    }
-    if max == 0 {
-        return String::new();
-    }
-    let tail: String = s.chars().skip(n - (max - 1)).collect();
-    format!("…{tail}")
-}
-
-fn truncate_right(s: &str, max: usize) -> String {
-    let n = s.chars().count();
-    if n <= max {
-        return s.to_string();
-    }
-    if max == 0 {
-        return String::new();
-    }
-    let head: String = s.chars().take(max - 1).collect();
-    format!("{head}…")
 }
 
 #[cfg(test)]
