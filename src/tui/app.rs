@@ -164,6 +164,9 @@ impl App {
     /// same item even though category sorting may shift the rows. Appending
     /// never moves existing indices, so the item index is a stable identity.
     pub fn push_item(&mut self, mut item: CleanupItem) {
+        // A cursor still resting on the top item follows the top as results
+        // stream in; once the user has moved, it sticks to what they chose.
+        let at_top = self.state.selected().is_some() && self.state.selected() == self.top_row();
         let keep = self.highlighted_row().cloned();
         if self.preselect_groups.contains(&item.group_id) {
             item.selected = true;
@@ -176,6 +179,7 @@ impl App {
         // Items are only ever appended, so an item index stays valid; a header
         // is re-found by its category name.
         let row = match keep {
+            _ if at_top => None,
             Some(ResultRow::EmptyLine) | None => None,
             Some(target) => self.rendered_rows.iter().position(|r| *r == target),
         };
@@ -327,6 +331,12 @@ impl App {
 
     fn is_navigable(&self, row: usize) -> bool {
         !matches!(self.rendered_rows[row], ResultRow::EmptyLine)
+    }
+
+    /// The row a fresh cursor lands on: the first navigable row below the
+    /// leading category header.
+    fn top_row(&self) -> Option<usize> {
+        (1..self.rendered_rows.len()).find(|&i| self.is_navigable(i))
     }
 
     pub fn next(&mut self) {
@@ -715,20 +725,32 @@ mod tests {
     }
 
     #[test]
+    fn push_item_keeps_cursor_on_the_top_item_until_the_user_moves() {
+        let mut app = App::new();
+        app.begin_scan(2);
+        app.push_item(item("m", "M", 1));
+        assert_eq!(app.selected_item().unwrap().name, "m");
+        app.push_item(item("a", "A", 1)); // sorts before M → new top item
+        assert_eq!(app.selected_item().unwrap().name, "a");
+    }
+
+    #[test]
     fn push_item_keeps_highlight_on_same_item() {
         let mut app = App::new();
         app.begin_scan(3);
+        app.push_item(item("a", "A", 1));
         app.push_item(item("m", "M", 1));
+        // Rows: hdr A, a, blank, hdr M, m — walk down onto "m".
+        while app.selected_item().map(|i| i.name.as_str()) != Some("m") {
+            app.next();
+        }
+        app.push_item(item("b", "A", 1)); // lands above → rows shift
         assert_eq!(app.selected_item().unwrap().name, "m");
-        app.push_item(item("a", "A", 1)); // sorts before M → rows shift
-        assert_eq!(app.selected_item().unwrap().name, "m");
-        assert_eq!(app.scan.checked, 2);
+        assert_eq!(app.scan.checked, 3);
         assert!(app.is_scanning());
-        app.note_missing();
         app.finish_scan();
         assert!(!app.is_scanning());
-        assert_eq!(app.scan.checked, 3);
-        assert_eq!(app.total_size, 2);
+        assert_eq!(app.total_size, 3);
     }
 
     #[test]

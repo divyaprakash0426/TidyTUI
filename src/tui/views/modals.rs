@@ -18,9 +18,6 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
     let selected_size = ByteSize(app.selected_size());
     let home = dirs::home_dir();
 
-    let area = centered_rect(70, 50, f.area());
-    f.render_widget(Clear, area);
-
     let block = Block::default()
         .title(" CONFIRM CLEANUP ")
         .borders(Borders::ALL)
@@ -101,6 +98,10 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
         Span::raw(" to cancel."),
     ]));
 
+    // Borders and uniform padding add two rows above and two below the text.
+    let height = text.len() as u16 + 4;
+    let area = centered_fixed_height(70, height, f.area());
+    f.render_widget(Clear, area);
     let paragraph = Paragraph::new(text)
         .block(block)
         .alignment(Alignment::Center);
@@ -251,26 +252,6 @@ pub fn render_progress(
     f.render_widget(gauge, chunks[1]);
 }
 
-pub(super) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +273,46 @@ mod tests {
         assert!(s.contains("Trash"), "{s}");
         assert!(s.contains("permission denied"), "{s}");
         assert!(s.contains("Enter"), "{s}");
+    }
+
+    #[test]
+    fn confirm_modal_is_sized_to_its_content() {
+        use crate::core::CleanMode;
+        use crate::tui::app::App;
+        use std::path::PathBuf;
+        let mut app = App::new();
+        app.set_items(
+            (0..3)
+                .map(|i| crate::core::CleanupItem {
+                    group_id: format!("g{i}"),
+                    name: format!("Item {i}"),
+                    category: "Dev".into(),
+                    description: None,
+                    path: PathBuf::from(format!("/tmp/x{i}")),
+                    size_bytes: 10,
+                    file_count: 1,
+                    selected: true,
+                    status: crate::core::ItemStatus::Scanned,
+                    mode: CleanMode::Contents,
+                    keep_days: None,
+                    locked: false,
+                    command: None,
+                })
+                .collect(),
+        );
+        let s = render_to_string(120, 40, |f| render_confirm(f, &app));
+        let lines: Vec<&str> = s.lines().collect();
+        let top = lines
+            .iter()
+            .position(|l| l.contains("CONFIRM CLEANUP"))
+            .expect("title");
+        let bottom = lines
+            .iter()
+            .rposition(|l| l.contains('└') || l.contains('╰'))
+            .expect("bottom border");
+        // 1 heading + blank + 3 paths + blank + mode + blank + prompt = 9 text
+        // rows, plus 1 row of padding above and below and the bottom border.
+        assert_eq!(bottom - top, 9 + 2 + 1, "{s}");
     }
 
     #[test]

@@ -76,15 +76,19 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect, home: Option<&Path>) {
     let counts = app.category_counts();
     let inner_width = area.width.saturating_sub(2) as usize;
     let (items, collapsed) = (&app.items, &app.collapsed);
+    let highlighted = app.state.selected();
     let rows: Vec<ListItem> = app
         .rendered_rows
         .iter()
-        .map(|row| match row {
+        .enumerate()
+        .map(|(i, row)| match row {
             ResultRow::CategoryHeader(cat) => {
                 let count = counts.get(cat).copied().unwrap_or(0);
                 header_row(th, items, collapsed.contains(cat), cat, count)
             }
-            ResultRow::Item(idx) => item_row(th, &items[*idx], home, inner_width),
+            ResultRow::Item(idx) => {
+                item_row(th, &items[*idx], home, inner_width, highlighted == Some(i))
+            }
             ResultRow::EmptyLine => ListItem::new(""),
         })
         .collect();
@@ -298,7 +302,11 @@ fn item_row<'a>(
     item: &'a CleanupItem,
     home: Option<&Path>,
     width: usize,
+    highlighted: bool,
 ) -> ListItem<'a> {
+    // The highlight background can equal the dim colour (it does in the
+    // default theme), so the path switches to the text colour on that row.
+    let path_fg = if highlighted { th.text } else { th.dim };
     let checkbox = if item.selected { "[x] " } else { "[ ] " };
     let size = ByteSize(item.size_bytes).to_string();
     let status = (item.status != ItemStatus::Scanned || item.locked).then(|| status_span(th, item));
@@ -332,7 +340,7 @@ fn item_row<'a>(
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
-        Span::styled(format!("{path:<path_col$}"), Style::default().fg(th.dim)),
+        Span::styled(format!("{path:<path_col$}"), Style::default().fg(path_fg)),
         Span::styled(format!("{size:>SIZE_COL$}"), Style::default().fg(th.size)),
     ];
     if let Some(status) = status {
@@ -400,6 +408,33 @@ mod tests {
         test_util::render_to_string(width, 14, |f| {
             render_with_home(f, app, f.area(), Some(Path::new("/home/u")))
         })
+    }
+
+    #[test]
+    fn highlighted_row_path_is_readable_on_the_highlight_background() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = App::new();
+        app.set_items(vec![item(
+            "Yay Cache",
+            "/home/u/.cache/yay",
+            10,
+            ItemStatus::Scanned,
+        )]);
+        let th = Theme::default();
+        assert_eq!(th.dim, th.surface, "test relies on the default theme clash");
+        let mut t = Terminal::new(TestBackend::new(120, 14)).unwrap();
+        t.draw(|f| render_with_home(f, &mut app, f.area(), Some(Path::new("/home/u"))))
+            .unwrap();
+        let buf = t.backend().buffer();
+        let row = (0..buf.area.height)
+            .find(|&y| (0..buf.area.width).any(|x| buf[(x, y)].bg == th.surface))
+            .expect("a highlighted row");
+        let path_x = (0..buf.area.width)
+            .find(|&x| buf[(x, row)].symbol() == "~")
+            .expect("path drawn on the highlighted row");
+        let cell = &buf[(path_x, row)];
+        assert_eq!(cell.bg, th.surface);
+        assert_ne!(cell.fg, th.dim, "dim-on-dim path is invisible");
     }
 
     #[test]
