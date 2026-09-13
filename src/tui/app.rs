@@ -19,7 +19,11 @@ pub enum ResultRow {
 pub enum AppState {
     Viewing,
     Confirming,
-    Cleaning { current: usize, total: usize, item_name: String },
+    Cleaning {
+        current: usize,
+        total: usize,
+        item_name: String,
+    },
 }
 
 pub struct App {
@@ -52,7 +56,7 @@ impl App {
         self.state.select(Some(0));
         // Ensure first item is selected if possible
         if !self.rendered_rows.is_empty() {
-             self.next(); // Find first selectable item
+            self.next(); // Find first selectable item
         }
     }
 
@@ -76,7 +80,9 @@ impl App {
 
     pub fn next(&mut self) {
         let len = self.rendered_rows.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
 
         let current = self.state.selected().unwrap_or(len - 1);
         let mut next = (current + 1) % len;
@@ -95,7 +101,9 @@ impl App {
 
     pub fn previous(&mut self) {
         let len = self.rendered_rows.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
 
         let current = self.state.selected().unwrap_or(0);
         let mut prev = if current == 0 { len - 1 } else { current - 1 };
@@ -121,7 +129,7 @@ impl App {
             }
         }
     }
-    
+
     pub fn toggle_dry_run(&mut self) {
         self.dry_run = !self.dry_run;
     }
@@ -145,7 +153,8 @@ impl App {
     pub fn cleanup_finished(&mut self) {
         use crate::core::ItemStatus;
         // Keep only items that were not successfully deleted
-        self.items.retain(|i| !matches!(i.status, ItemStatus::Deleted));
+        self.items
+            .retain(|i| !matches!(i.status, ItemStatus::Deleted));
         self.total_size = self.items.iter().map(|i| i.size_bytes).sum();
         self.calculate_rendered_rows();
         self.state.select(Some(0));

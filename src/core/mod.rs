@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
+pub mod cleaner;
 pub mod discovery;
 pub mod registry;
 pub mod scanner;
-pub mod cleaner;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemStatus {

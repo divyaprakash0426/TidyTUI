@@ -1,8 +1,8 @@
+use crate::core::discovery::OsType;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
-use crate::core::discovery::OsType;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Rule {
@@ -42,7 +42,9 @@ pub fn load_definitions() -> Result<Definitions> {
         }
     }
 
-    Err(anyhow::anyhow!("Changes definitions.yaml not found in any of the search paths."))
+    Err(anyhow::anyhow!(
+        "Changes definitions.yaml not found in any of the search paths."
+    ))
 }
 
 pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String, String)> {

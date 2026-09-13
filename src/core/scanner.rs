@@ -1,7 +1,7 @@
+use crate::core::{CleanupItem, ItemStatus};
+use rayon::prelude::*;
 use std::path::Path;
 use walkdir::WalkDir;
-use rayon::prelude::*;
-use crate::core::{CleanupItem, ItemStatus};
 
 pub fn scan_path(path: &Path) -> u64 {
     WalkDir::new(path)
@@ -32,7 +32,7 @@ pub fn scan_targets(targets: Vec<(String, String, String)>) -> Vec<CleanupItem> 
 
             if path.exists() {
                 let size_bytes = scan_path(&path);
-                
+
                 Some(CleanupItem {
                     name,
                     category,
