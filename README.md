@@ -76,17 +76,28 @@ tidytui
 | `Tab` / `l` / `→` | Next tab |
 | `Shift+Tab` / `h` / `←` | Previous tab |
 | `1` / `2` / `3` | Jump to Dashboard / Results / Help |
-| `j` / `k` (or `↓` / `↑`) | Navigate items |
-| `Space` | Toggle selection |
+| `j` / `k` (or `↓` / `↑`) | Navigate rows (category headers included) |
+| `Space` | Toggle item — on a category header, toggle the whole category |
+| `a` / `A` | Select all / none (respects the active filter) |
+| `z` / `Z` | Fold the highlighted category / fold or unfold all |
+| `/`     | Filter by name or path (`Enter` keeps it, `Esc` clears it) |
+| `s`     | Cycle sort: default → size → name |
+| `r`     | Rescan |
 | `d`     | **Toggle Mode** (Dry-Run ↔ Danger) |
 | `Enter` | Clean selected items (asks for confirmation) |
 | `y` / `n` / `Esc` | Confirm / cancel the cleanup dialog |
 | `q`     | Quit |
 
+The scan runs in the background, so the interface appears immediately and the
+footer shows `⟳ Scanning n/m` until every location has been checked.
+
 In the Results tab each row shows the item name, the **exact path** that will be
 touched, its size, and — after a run — the outcome: `would delete` (dry-run),
-`deleted`, or `failed: <reason>`. The bar below the list shows the description,
-file count and cleaning mode of the highlighted item.
+`deleted`, or `failed: <reason>`. On terminals at least 100 columns wide a
+**Details** pane on the right shows the full path, size, file count, cleaning
+mode, status and description of the highlighted row; narrower terminals show a
+one-line info bar instead. After a run a summary dialog reports what was
+deleted (or would be, in dry-run), how much space was freed, and any failures.
 
 ## ⚙️ Configuration
 
