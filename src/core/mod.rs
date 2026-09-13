@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 pub mod cleaner;
 pub mod discovery;
+pub mod paths;
 pub mod registry;
 pub mod scanner;
 
