@@ -488,6 +488,7 @@ mod tests {
 
     fn item(name: &str, cat: &str, size: u64) -> CleanupItem {
         CleanupItem {
+            group_id: String::new(),
             name: name.into(),
             category: cat.into(),
             description: None,
@@ -497,6 +498,7 @@ mod tests {
             selected: false,
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
+            keep_days: None,
         }
     }
 

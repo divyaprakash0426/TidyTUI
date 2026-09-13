@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
 anyhow = "1.0.100"
-bytesize = "2.3.1"
+bytesize = { version = "2.3.1", features = ["serde"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
 os-release = "0.1.0"

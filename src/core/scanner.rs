@@ -1,9 +1,12 @@
 use crate::core::paths::expand_tilde;
+use crate::core::policy;
 use crate::core::registry::Target;
-use crate::core::{CleanupItem, ItemStatus};
+use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use rayon::prelude::*;
+use std::fs;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
 /// Progress messages from a background scan. Exactly one `Finished` is sent last.
@@ -33,13 +36,43 @@ pub fn scan_path(path: &Path) -> ScanResult {
         })
 }
 
+/// Measures exactly what cleaning would remove: with `keep_days` on a
+/// contents-mode directory only the old top-level entries are walked; on a
+/// dir-mode directory or a file, a fresh target is not eligible at all.
+fn measure(path: &Path, mode: CleanMode, keep_days: Option<u64>) -> Option<ScanResult> {
+    let now = SystemTime::now();
+    match (keep_days, path.is_dir(), mode) {
+        (Some(_), true, CleanMode::Contents) => {
+            let entries = policy::eligible_entries(path, keep_days, now).ok()?;
+            Some(entries.iter().fold(ScanResult::default(), |acc, e| {
+                let r = scan_path(&e.path());
+                ScanResult {
+                    size_bytes: acc.size_bytes + r.size_bytes,
+                    file_count: acc.file_count + r.file_count,
+                }
+            }))
+        }
+        (Some(days), _, _) => {
+            let meta = fs::symlink_metadata(path).ok()?;
+            policy::is_older_than(&meta, days, now).then(|| scan_path(path))
+        }
+        (None, _, _) => Some(scan_path(path)),
+    }
+}
+
 pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
     let path = expand_tilde(&target.path, home);
     if !path.exists() {
         return None;
     }
-    let result = scan_path(&path);
+    let result = measure(&path, target.mode, target.keep_days)?;
+    if let Some(min) = target.min_size {
+        if result.size_bytes < min.as_u64() {
+            return None;
+        }
+    }
     Some(CleanupItem {
+        group_id: target.group_id,
         name: target.name,
         category: target.category,
         description: target.description,
@@ -49,6 +82,7 @@ pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
         selected: false,
         status: ItemStatus::Scanned,
         mode: target.mode,
+        keep_days: target.keep_days,
     })
 }
 
@@ -90,6 +124,53 @@ mod tests {
     use crate::core::CleanMode;
     use std::fs;
 
+    fn set_age(path: &std::path::Path, days: u64) {
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 60 * 60);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+
+    #[test]
+    fn keep_days_counts_only_old_top_level_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old.bin");
+        let fresh = dir.path().join("fresh.bin");
+        fs::write(&old, vec![0u8; 100]).unwrap();
+        fs::write(&fresh, vec![0u8; 1000]).unwrap();
+        set_age(&old, 60);
+
+        let mut t = target(dir.path().to_str().unwrap(), CleanMode::Contents);
+        t.keep_days = Some(30);
+        let item = scan_target(t, None).unwrap();
+        assert_eq!(item.size_bytes, 100);
+        assert_eq!(item.file_count, 1);
+        assert_eq!(item.keep_days, Some(30));
+    }
+
+    #[test]
+    fn keep_days_on_dir_mode_skips_recently_modified_target() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("f"), b"x").unwrap();
+        let mut t = target(dir.path().to_str().unwrap(), CleanMode::Dir);
+        t.keep_days = Some(30);
+        assert!(scan_target(t, None).is_none(), "fresh dir is not eligible");
+    }
+
+    #[test]
+    fn min_size_drops_small_items() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("f"), vec![0u8; 10]).unwrap();
+        let mut t = target(dir.path().to_str().unwrap(), CleanMode::Contents);
+        t.min_size = Some(bytesize::ByteSize::kib(1));
+        assert!(scan_target(t.clone(), None).is_none());
+        t.min_size = Some(bytesize::ByteSize::b(10));
+        assert!(scan_target(t, None).is_some(), "threshold is inclusive");
+    }
+
     fn target(path: &str, mode: CleanMode) -> Target {
         Target {
             group_id: "x".into(),
@@ -98,6 +179,8 @@ mod tests {
             description: Some("d".into()),
             path: path.into(),
             mode,
+            keep_days: None,
+            min_size: None,
         }
     }
 

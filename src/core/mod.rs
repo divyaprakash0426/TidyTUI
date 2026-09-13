@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod cleaner;
 pub mod discovery;
 pub mod paths;
+pub mod policy;
 pub mod registry;
 pub mod scanner;
 
@@ -29,6 +30,8 @@ pub enum ItemStatus {
 
 #[derive(Debug, Clone)]
 pub struct CleanupItem {
+    /// Id of the definitions group this item came from (for `--select`).
+    pub group_id: String,
     pub name: String,
     pub category: String,
     pub description: Option<String>,
@@ -38,4 +41,6 @@ pub struct CleanupItem {
     pub selected: bool,
     pub status: ItemStatus,
     pub mode: CleanMode,
+    /// Only entries older than this many days are counted and removed.
+    pub keep_days: Option<u64>,
 }

@@ -1,6 +1,7 @@
 use crate::core::discovery::OsType;
 use crate::core::CleanMode;
 use anyhow::{Context, Result};
+use bytesize::ByteSize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -11,6 +12,12 @@ pub struct Rule {
     pub path: String,
     #[serde(default)]
     pub mode: CleanMode,
+    /// Only remove entries last modified at least this many days ago.
+    #[serde(default)]
+    pub keep_days: Option<u64>,
+    /// Hide the item unless it is at least this large (e.g. `10 MiB`).
+    #[serde(default)]
+    pub min_size: Option<ByteSize>,
 }
 
 fn default_category() -> String {
@@ -41,6 +48,8 @@ pub struct Target {
     pub description: Option<String>,
     pub path: String,
     pub mode: CleanMode,
+    pub keep_days: Option<u64>,
+    pub min_size: Option<ByteSize>,
 }
 
 pub fn parse_definitions(yaml: &str) -> Result<Definitions> {
@@ -101,6 +110,8 @@ pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<Target> 
                     description: group.description.clone(),
                     path: rule.path.clone(),
                     mode: rule.mode,
+                    keep_days: rule.keep_days,
+                    min_size: rule.min_size,
                 })
         })
         .collect()
@@ -109,6 +120,32 @@ pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<Target> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rules_parse_keep_days_and_min_size() {
+        let yaml = r#"
+groups:
+  - id: trash
+    name: Trash
+    rules:
+      - os: any
+        path: ~/.local/share/Trash
+        keep_days: 30
+        min_size: 10 MiB
+      - os: any
+        path: ~/x
+"#;
+        let defs = parse_definitions(yaml).unwrap();
+        let r = &defs.groups[0].rules;
+        assert_eq!(r[0].keep_days, Some(30));
+        assert_eq!(r[0].min_size, Some(bytesize::ByteSize::mib(10)));
+        assert_eq!(r[1].keep_days, None);
+        assert_eq!(r[1].min_size, None);
+
+        let targets = filter_rules(&defs, &OsType::Arch);
+        assert_eq!(targets[0].keep_days, Some(30));
+        assert_eq!(targets[0].group_id, "trash");
+    }
     use crate::core::discovery::OsType;
 
     const YAML: &str = r#"

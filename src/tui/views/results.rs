@@ -190,7 +190,17 @@ fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
                 ]),
                 Line::from(vec![label("Mode"), Span::raw(mode_label(item.mode))]),
                 Line::from(vec![label("Status"), status_span(&item.status)]),
+                Line::from(vec![
+                    label("Group"),
+                    Span::styled(item.group_id.clone(), Style::default().fg(Color::DarkGray)),
+                ]),
             ];
+            if let Some(days) = item.keep_days {
+                lines.push(Line::from(vec![
+                    label("Keeps"),
+                    Span::raw(format!("entries newer than {days} days")),
+                ]));
+            }
             if let Some(desc) = &item.description {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
@@ -326,6 +336,7 @@ mod tests {
 
     fn item(name: &str, path: &str, size: u64, status: ItemStatus) -> CleanupItem {
         CleanupItem {
+            group_id: String::new(),
             name: name.into(),
             category: "Dev".into(),
             description: None,
@@ -335,6 +346,7 @@ mod tests {
             selected: false,
             status,
             mode: CleanMode::Contents,
+            keep_days: None,
         }
     }
 
@@ -411,11 +423,15 @@ mod tests {
         let mut app = App::new();
         let mut it = item("Pip Cache", "/home/u/.cache/pip", 1, ItemStatus::DryRun);
         it.description = Some("Python package cache".into());
+        it.group_id = "dev_pip".into();
+        it.keep_days = Some(30);
         app.set_items(vec![it]);
         let s = render_at(&mut app, 120);
         assert!(s.contains("Path"), "{s}");
         assert!(s.contains("Status"), "{s}");
         assert!(s.contains("Python package cache"), "{s}");
+        assert!(s.contains("dev_pip"), "{s}");
+        assert!(s.contains("newer than 30 days"), "{s}");
     }
 
     #[test]

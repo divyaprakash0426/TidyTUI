@@ -178,6 +178,7 @@ mod tests {
     fn app_with_item() -> App {
         let mut app = App::new();
         app.set_items(vec![CleanupItem {
+            group_id: String::new(),
             name: "Pip".into(),
             category: "Dev".into(),
             description: None,
@@ -187,6 +188,7 @@ mod tests {
             selected: false,
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
+            keep_days: None,
         }]);
         app.active_tab = Tab::Results;
         app

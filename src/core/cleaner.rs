@@ -1,8 +1,10 @@
+use crate::core::policy;
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
+use std::time::SystemTime;
 
 /// Progress messages from a background cleaning run. `idx` is the caller's
 /// index into its own item list. Exactly one `Done` is sent last.
@@ -38,18 +40,12 @@ pub fn spawn_clean(jobs: Vec<(usize, CleanupItem)>, dry_run: bool) -> Receiver<C
 /// Removes every entry inside `dir` but keeps `dir` itself. Symlinks are
 /// unlinked, never followed. Continues past individual failures and reports
 /// them collectively so a single locked file does not abort the whole sweep.
-pub fn remove_contents(dir: &Path) -> Result<()> {
-    let entries = fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
+pub fn remove_contents(dir: &Path, keep_days: Option<u64>) -> Result<()> {
+    let entries = policy::eligible_entries(dir, keep_days, SystemTime::now())
+        .with_context(|| format!("reading {}", dir.display()))?;
     let mut failures: Vec<String> = Vec::new();
 
     for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                failures.push(e.to_string());
-                continue;
-            }
-        };
         let path = entry.path();
         // file_type() does not follow symlinks, so a symlinked dir is treated as a file.
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -92,7 +88,7 @@ pub fn clean_item(item: &mut CleanupItem, dry_run: bool) -> Result<()> {
 
     let result = if item.path.is_dir() {
         match item.mode {
-            CleanMode::Contents => remove_contents(&item.path),
+            CleanMode::Contents => remove_contents(&item.path, item.keep_days),
             CleanMode::Dir => fs::remove_dir_all(&item.path).context("removing directory"),
         }
     } else {
@@ -114,12 +110,33 @@ pub fn clean_item(item: &mut CleanupItem, dry_run: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remove_contents_with_keep_days_spares_fresh_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("old");
+        let fresh = dir.path().join("fresh");
+        fs::write(&old, b"o").unwrap();
+        fs::write(&fresh, b"f").unwrap();
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+
+        remove_contents(dir.path(), Some(30)).unwrap();
+        assert!(!old.exists());
+        assert!(fresh.exists());
+    }
     use crate::core::CleanMode;
     use std::fs;
     use std::path::Path;
 
     fn item(path: &Path, mode: CleanMode) -> CleanupItem {
         CleanupItem {
+            group_id: String::new(),
             name: "t".into(),
             category: "c".into(),
             description: None,
@@ -129,6 +146,7 @@ mod tests {
             selected: true,
             status: ItemStatus::Scanned,
             mode,
+            keep_days: None,
         }
     }
 

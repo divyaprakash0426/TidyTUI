@@ -117,6 +117,7 @@ mod tests {
     fn app_with_item() -> App {
         let mut app = App::new();
         app.set_items(vec![CleanupItem {
+            group_id: String::new(),
             name: "a".into(),
             category: "A".into(),
             description: None,
@@ -126,6 +127,7 @@ mod tests {
             selected: false,
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
+            keep_days: None,
         }]);
         app
     }
@@ -249,6 +251,7 @@ mod tests {
         app.items[0].selected = true;
         app.begin_scan(1);
         app.items.push(CleanupItem {
+            group_id: String::new(),
             name: "b".into(),
             category: "A".into(),
             description: None,
@@ -258,6 +261,7 @@ mod tests {
             selected: true,
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
+            keep_days: None,
         });
         handle_key(&mut app, key(KeyCode::Enter));
         assert_eq!(app.app_state, AppState::Viewing);

@@ -126,6 +126,15 @@ groups:
     rules:
       - os: "any"
         path: "~/.npm"
+
+  - id: "user_trash"
+    name: "Trash Bin"
+    category: "System"
+    rules:
+      - os: "any"
+        path: "~/.local/share/Trash"
+        keep_days: 30               # optional — only entries older than 30 days
+        min_size: "10 MiB"          # optional — hide the item when smaller
 ```
 
 | Field | Meaning |
@@ -134,6 +143,8 @@ groups:
 | `path` | Absolute path; `~` expands to your home directory |
 | `mode` | `contents` **empties** the folder but keeps it (safe for caches that tools expect to exist). `dir` removes the folder itself. Defaults to `contents`. |
 | `category` | Optional heading used to group items in the Results tab. Defaults to `Other`. |
+| `keep_days` | Optional. Only entries last modified at least this many days ago are counted and removed (top-level entries for `contents`, the target itself for `dir`/files). |
+| `min_size` | Optional. Hide the item unless it is at least this large, e.g. `"10 MiB"` or `"500 KB"`. |
 
 ## 🏗️ Technical Stack
 
