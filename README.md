@@ -13,10 +13,13 @@ TidyTUI is a lightweight, ncurses-style utility to scan your Linux system for ac
 
 ## 🚀 Features
 
-- **⚡ Blazingly Fast**: Powered by `rayon` for multi-threaded scanning and `walkdir` for efficient traversal.
-- **🛡️ Safety First**: Defaults to **Dry-Run Mode**. You must explicitly toggle "Danger Mode" to delete files.
+- **⚡ Blazingly Fast**: Powered by `rayon` for multi-threaded scanning and `walkdir` for efficient traversal. The interface opens instantly and fills in as the scan streams results.
+- **🛡️ Safety First**: Defaults to **Dry-Run Mode**. You must explicitly toggle "Danger Mode" to delete files. Caches are emptied, never removed, unless a rule says otherwise.
+- **📊 Disk-Aware Dashboard**: Shows how much of your disk the junk occupies, a per-category breakdown, and the largest offenders.
+- **🎛️ Fine-Grained Selection**: Select all, whole categories or single items; fold categories; filter by name/path; sort by size or name; a details pane shows exactly which path will be touched.
 - **🐧 Distro Agnostic**: Automatically detects your OS (Arch, Ubuntu, Debian, etc.) and applies relevant cleaning rules.
-- **🛠️ Configurable**: Define your own cleaning groups and paths in simple YAML.
+- **🛠️ Configurable**: Define your own cleaning groups and paths in simple YAML, with age (`keep_days`) and size (`min_size`) thresholds.
+- **🤖 Scriptable**: `--list`/`--json` for reports, `--select … --yes` for headless cleaning in cron jobs.
 - **📦 Zero Dependencies**: Compiles to a single binary.
 
 ## 📦 Installation
@@ -66,8 +69,37 @@ cargo install --path .
 ## 🎮 Usage
 
 ```bash
-tidytui
+tidytui                # interactive TUI, dry-run by default
+tidytui --danger       # interactive, but Enter really deletes
+tidytui --list         # scan and print a table of what would be cleaned, then exit
+tidytui --list --json  # same, as JSON (for scripts)
+tidytui -s dev_pip,user_trash          # open the TUI with those groups pre-selected
+tidytui -s dev_pip,user_trash --yes    # clean them headlessly (dry-run unless --danger)
+tidytui -c ./my-rules.yaml             # use a specific definitions file
 ```
+
+```
+Options:
+  -c, --config <FILE>  Path to a definitions.yaml (overrides the default search locations)
+  -n, --dry-run        Start in dry-run mode (default; nothing is deleted)
+      --danger         Start in danger mode: cleaning really deletes files
+  -l, --list           Scan and print what would be cleaned, then exit (no TUI)
+      --json           With --list, print machine-readable JSON instead of a table
+  -s, --select <ID>    Pre-select these definition group ids (comma-separated)
+  -y, --yes            Clean the --select'ed groups without the TUI (dry-run unless --danger)
+```
+
+Group ids are the `id` fields from `definitions.yaml`; `--list` prints them in
+its first column. Headless runs (`--list`, `--yes`) exit non-zero when a group id
+is unknown or a deletion fails, so they are safe to use in cron jobs.
+
+### Dashboard
+
+The Dashboard tab puts the scan in context: an **Overview** (locations, files,
+junk found, selection), a **Disk** gauge showing how full the disk is and what
+share of it the junk represents (the verdict — *Clean*, *Moderate*, *Critical* —
+is relative to disk size, not a fixed number), **Junk by Category** bars, and
+the five **Largest Items**.
 
 ### Controls
 

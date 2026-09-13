@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// A blazingly fast, terminal-based system cleaner.
 #[derive(Parser, Debug, Clone, PartialEq, Eq)]
-#[command(name = "tidytui", version, about)]
+#[command(name = "tidytui", bin_name = "tidytui", version, about)]
 pub struct Cli {
     /// Path to a definitions.yaml (overrides the default search locations)
     #[arg(short, long, value_name = "FILE")]
