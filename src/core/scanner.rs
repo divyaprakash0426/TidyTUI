@@ -3,6 +3,7 @@ use crate::core::registry::Target;
 use crate::core::{perms, policy};
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use rayon::prelude::*;
+use std::fs;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::SystemTime;
@@ -44,7 +45,16 @@ fn measure(path: &Path, mode: CleanMode, keep_days: Option<u64>) -> Option<ScanR
         (Some(_), true, CleanMode::Contents) => {
             let entries = policy::eligible_entries(path, keep_days, now).ok()?;
             Some(entries.iter().fold(ScanResult::default(), |acc, e| {
-                let r = scan_path(&e.path());
+                // A symlink entry is unlinked, not followed: it frees nothing.
+                let is_link = e.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+                let r = if is_link {
+                    ScanResult {
+                        size_bytes: 0,
+                        file_count: 1,
+                    }
+                } else {
+                    scan_path(&e.path())
+                };
                 ScanResult {
                     size_bytes: acc.size_bytes + r.size_bytes,
                     file_count: acc.file_count + r.file_count,
@@ -61,6 +71,16 @@ pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
     if !path.exists() {
         return None;
     }
+    // Cleaning would otherwise act through the link while the UI shows the
+    // link's path; resolve it so what is shown is what gets touched.
+    let is_link = fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    let path = if is_link {
+        fs::canonicalize(&path).ok()?
+    } else {
+        path
+    };
     if let Some(cmd) = &target.command {
         let program = cmd.split_whitespace().next()?;
         if !program_on_path(program) {
@@ -199,6 +219,38 @@ mod tests {
         t.command = Some("true".into());
         let item = scan_target(t, None).unwrap();
         assert_eq!(item.command.as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn symlinked_target_is_resolved_so_the_shown_path_is_the_one_cleaned() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::write(real.join("f"), [0u8; 10]).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let item = scan_target(target(link.to_str().unwrap(), CleanMode::Contents), None).unwrap();
+        assert_eq!(item.path, fs::canonicalize(&real).unwrap());
+        assert_eq!(item.size_bytes, 10);
+    }
+
+    #[test]
+    fn keep_days_contents_does_not_measure_through_symlinked_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("big"), [0u8; 1000]).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("lnk")).unwrap();
+        fs::write(dir.path().join("f"), [0u8; 5]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        // keep_days = 0 makes every entry eligible without touching mtimes.
+        let r = measure(dir.path(), CleanMode::Contents, Some(0)).unwrap();
+        assert_eq!(
+            r.size_bytes, 5,
+            "the link is unlinked, its target untouched"
+        );
+        assert_eq!(r.file_count, 2);
     }
 
     #[test]

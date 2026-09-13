@@ -157,7 +157,7 @@ impl App {
     /// same item even though category sorting may shift the rows. Appending
     /// never moves existing indices, so the item index is a stable identity.
     pub fn push_item(&mut self, mut item: CleanupItem) {
-        let keep = self.selected_index();
+        let keep = self.highlighted_row().cloned();
         if self.preselect_groups.contains(&item.group_id) {
             item.selected = true;
         }
@@ -166,11 +166,12 @@ impl App {
         self.scan.checked += 1;
         self.calculate_rendered_rows();
 
-        let row = keep.and_then(|idx| {
-            self.rendered_rows
-                .iter()
-                .position(|r| matches!(r, ResultRow::Item(i) if *i == idx))
-        });
+        // Items are only ever appended, so an item index stays valid; a header
+        // is re-found by its category name.
+        let row = match keep {
+            Some(ResultRow::EmptyLine) | None => None,
+            Some(target) => self.rendered_rows.iter().position(|r| *r == target),
+        };
         match row {
             Some(r) => self.state.select(Some(r)),
             None => {
@@ -717,6 +718,23 @@ mod tests {
         assert!(!app.is_scanning());
         assert_eq!(app.scan.checked, 3);
         assert_eq!(app.total_size, 2);
+    }
+
+    #[test]
+    fn push_item_keeps_highlight_on_a_category_header() {
+        let mut app = App::new();
+        app.begin_scan(3);
+        app.push_item(item("a", "A", 1));
+        app.push_item(item("m", "M", 1));
+        // Move onto the "M" header (rows: hdr A, a, blank, hdr M, m).
+        while app.highlighted_row() != Some(&ResultRow::CategoryHeader("M".into())) {
+            app.next();
+        }
+        app.push_item(item("b", "A", 1)); // lands above → M header shifts down
+        assert_eq!(
+            app.highlighted_row(),
+            Some(&ResultRow::CategoryHeader("M".into()))
+        );
     }
 
     #[test]
