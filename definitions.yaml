@@ -1,5 +1,6 @@
 groups:
   - id: "pkg_manager"
+    category: "System"
     name: "Package Cache"
     description: "Cached installer files"
     rules:
@@ -15,6 +16,7 @@ groups:
         path: "/var/cache/zypp/packages/"
 
   - id: "user_trash"
+    category: "System"
     name: "Trash Bin"
     description: "User's deleted files"
     rules:
@@ -23,6 +25,7 @@ groups:
 
   # --- Developer Tools ---
   - id: "dev_npm"
+    category: "Developer Tools"
     name: "NPM Cache"
     description: "Node Package Manager cache"
     rules:
@@ -30,6 +33,7 @@ groups:
         path: "~/.npm"
 
   - id: "dev_pip"
+    category: "Developer Tools"
     name: "Pip Cache"
     description: "Python package cache"
     rules:
@@ -37,6 +41,7 @@ groups:
         path: "~/.cache/pip"
 
   - id: "dev_go"
+    category: "Developer Tools"
     name: "Go Build Cache"
     description: "Go build artifacts"
     rules:
@@ -44,6 +49,7 @@ groups:
         path: "~/.cache/go-build"
   
   - id: "dev_pnpm"
+    category: "Developer Tools"
     name: "PNPM Store"
     description: "PNPM global store"
     rules:
@@ -51,6 +57,7 @@ groups:
         path: "~/.local/share/pnpm/store"
 
   - id: "dev_yarn"
+    category: "Developer Tools"
     name: "Yarn Cache"
     description: "Yarn global cache"
     rules:
@@ -59,6 +66,7 @@ groups:
 
   # --- Editors & IDEs ---
   - id: "ide_jetbrains"
+    category: "Editors & IDEs"
     name: "JetBrains Cache"
     description: "IntelliJ/PyCharm/WebStorm caches"
     rules:
@@ -66,6 +74,7 @@ groups:
         path: "~/.cache/JetBrains"
 
   - id: "ide_vscode"
+    category: "Editors & IDEs"
     name: "VSCode Cache"
     description: "Visual Studio Code cache"
     rules:
@@ -76,6 +85,7 @@ groups:
 
   # --- System & Browsers ---
   - id: "sys_thumbnails"
+    category: "System"
     name: "Thumbnail Cache"
     description: "Generated image thumbnails"
     rules:
@@ -83,12 +93,14 @@ groups:
         path: "~/.cache/thumbnails"
 
   - id: "browser_chrome"
+    category: "Browsers"
     name: "Chrome Cache"
     rules:
       - os: "any"
         path: "~/.cache/google-chrome"
   
   - id: "browser_firefox"
+    category: "Browsers"
     name: "Firefox Cache"
     rules:
       - os: "any"
@@ -96,6 +108,7 @@ groups:
   
   # --- AI & LLM Tools ---
   - id: "ai_huggingface"
+    category: "AI & LLM"
     name: "HuggingFace Cache"
     description: "Model and dataset cache"
     rules:
@@ -103,12 +116,14 @@ groups:
         path: "~/.cache/huggingface"
 
   - id: "ai_torch"
+    category: "AI & LLM"
     name: "PyTorch Cache"
     rules:
       - os: "any"
         path: "~/.cache/torch"
 
   - id: "ai_claude"
+    category: "AI & LLM"
     name: "Claude App Cache"
     rules:
       - os: "any"
@@ -116,12 +131,14 @@ groups:
 
   # --- Linux Desktop & Window Managers ---
   - id: "desktop_hyprland"
+    category: "Desktop"
     name: "Hyprland Cache"
     rules:
       - os: "any"
         path: "~/.cache/hyprland"
 
   - id: "desktop_rofi"
+    category: "Desktop"
     name: "Rofi Cache"
     rules:
       - os: "any"
@@ -130,6 +147,7 @@ groups:
         path: "~/.cache/rofi3.druncache"
 
   - id: "desktop_wofi"
+    category: "Desktop"
     name: "Wofi Cache"
     rules:
       - os: "any"
@@ -139,6 +157,7 @@ groups:
 
   # --- Package Managers (AUR) ---
   - id: "aur_yay"
+    category: "AUR Helpers"
     name: "Yay Cache"
     description: "AUR Helper cache (Arch)"
     rules:
@@ -146,6 +165,7 @@ groups:
         path: "~/.cache/yay"
 
   - id: "aur_paru"
+    category: "AUR Helpers"
     name: "Paru Cache"
     description: "AUR Helper cache (Arch)"
     rules:
@@ -154,18 +174,21 @@ groups:
 
   # --- Other Dev Tools ---
   - id: "dev_nvim"
+    category: "Editors & IDEs"
     name: "Neovim Cache"
     rules:
       - os: "any"
         path: "~/.cache/nvim"
 
   - id: "dev_kitty"
+    category: "Desktop"
     name: "Kitty Terminal Cache"
     rules:
       - os: "any"
         path: "~/.cache/kitty"
 
   - id: "dev_docker"
+    category: "Developer Tools"
     name: "Docker Cache"
     description: "Requires running docker prune usually, checking common paths"
     rules:
@@ -174,6 +197,7 @@ groups:
         path: "~/.docker/desktop/cache" 
 
   - id: "app_discord"
+    category: "Apps"
     name: "Discord Cache"
     rules:
       - os: "any"
@@ -182,6 +206,7 @@ groups:
         path: "~/.config/discord/Code Cache"
 
   - id: "app_spotify"
+    category: "Apps"
     name: "Spotify Cache"
     rules:
       - os: "any"
@@ -189,6 +214,7 @@ groups:
 
   # --- Antigravity ---
   - id: "app_antigravity"
+    category: "AI & LLM"
     name: "Antigravity Cache"
     description: "Browser profile caches"
     rules:
@@ -200,10 +226,3 @@ groups:
         path: "~/.gemini/antigravity-browser-profile/ShaderCache"
       - os: "any"
         path: "~/.gemini/antigravity-browser-profile/GrShaderCache"
-
-  # --- Test ---
-  - id: "test_group"
-    name: "Test Junk Folder"
-    rules:
-      - os: "any"
-        path: "~/test_junk"

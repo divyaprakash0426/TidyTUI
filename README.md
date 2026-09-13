@@ -73,11 +73,20 @@ tidytui
 
 | Key | Action |
 |:---|:---|
-| `j` / `k` | Navigate items |
+| `Tab` / `l` / `→` | Next tab |
+| `Shift+Tab` / `h` / `←` | Previous tab |
+| `1` / `2` / `3` | Jump to Dashboard / Results / Help |
+| `j` / `k` (or `↓` / `↑`) | Navigate items |
 | `Space` | Toggle selection |
 | `d`     | **Toggle Mode** (Dry-Run ↔ Danger) |
-| `Enter` | Clean selected items |
+| `Enter` | Clean selected items (asks for confirmation) |
+| `y` / `n` / `Esc` | Confirm / cancel the cleanup dialog |
 | `q`     | Quit |
+
+In the Results tab each row shows the item name, the **exact path** that will be
+touched, its size, and — after a run — the outcome: `would delete` (dry-run),
+`deleted`, or `failed: <reason>`. The bar below the list shows the description,
+file count and cleaning mode of the highlighted item.
 
 ## ⚙️ Configuration
 
@@ -93,17 +102,27 @@ TidyTUI looks for `definitions.yaml` in the following locations (in order):
 groups:
   - id: "pacman_cache"
     name: "Pacman Cache"
+    category: "System"              # optional — groups rows in the Results tab
     description: "Arch Linux package cache"
     rules:
       - os: "arch"
         path: "/var/cache/pacman/pkg/"
+        mode: "contents"            # optional — contents (default) | dir
 
   - id: "npm_cache"
     name: "NPM Cache"
+    category: "Developer Tools"
     rules:
       - os: "any"
         path: "~/.npm"
 ```
+
+| Field | Meaning |
+|:---|:---|
+| `os` | `arch`, `ubuntu`, `debian`, `fedora`, `opensuse`, or `any` |
+| `path` | Absolute path; `~` expands to your home directory |
+| `mode` | `contents` **empties** the folder but keeps it (safe for caches that tools expect to exist). `dir` removes the folder itself. Defaults to `contents`. |
+| `category` | Optional heading used to group items in the Results tab. Defaults to `Other`. |
 
 ## 🏗️ Technical Stack
 

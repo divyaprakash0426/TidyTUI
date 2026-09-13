@@ -152,6 +152,22 @@ groups:
     }
 
     #[test]
+    fn bundled_definitions_are_categorised_and_have_no_test_group() {
+        let defs = parse_definitions(include_str!("../../definitions.yaml")).unwrap();
+        let uncategorised: Vec<&str> = defs
+            .groups
+            .iter()
+            .filter(|g| g.category == "Other")
+            .map(|g| g.id.as_str())
+            .collect();
+        assert!(
+            uncategorised.is_empty(),
+            "missing category: {uncategorised:?}"
+        );
+        assert!(defs.groups.iter().all(|g| g.id != "test_group"));
+    }
+
+    #[test]
     fn unknown_os_gets_only_any_rules() {
         let defs = parse_definitions(YAML).unwrap();
         let targets = filter_rules(&defs, &OsType::Unknown("nix".into()));
