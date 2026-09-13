@@ -1,6 +1,7 @@
 use crate::core::registry::Target;
 use crate::core::{CleanupItem, ItemStatus};
 use crate::tui::theme::Theme;
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 
@@ -95,6 +96,8 @@ pub struct App {
     /// Group ids from `--select`; matching items are selected as they arrive.
     pub preselect_groups: Vec<String>,
     pub theme: Theme,
+    /// Size of the last drawn frame; lets mouse input map to screen regions.
+    pub viewport: Rect,
 }
 
 impl App {
@@ -117,6 +120,7 @@ impl App {
             collapsed: HashSet::new(),
             preselect_groups: Vec::new(),
             theme: Theme::default(),
+            viewport: Rect::default(),
         }
     }
 

@@ -21,21 +21,36 @@ pub fn render(f: &mut Frame, app: &mut App, area: Rect) {
 const DETAIL_PANE_MIN_WIDTH: u16 = 100;
 const DETAIL_PANE_WIDTH: u16 = 44;
 
-pub fn render_with_home(f: &mut Frame, app: &mut App, area: Rect, home: Option<&Path>) {
-    if area.width >= DETAIL_PANE_MIN_WIDTH {
-        let chunks = Layout::default()
+/// Splits the tab into the list and its companion: a details pane beside it
+/// on wide terminals, a one-line info bar below it otherwise.
+fn split(area: Rect) -> (Rect, Rect, bool) {
+    let wide = area.width >= DETAIL_PANE_MIN_WIDTH;
+    let chunks = if wide {
+        Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(0), Constraint::Length(DETAIL_PANE_WIDTH)])
-            .split(area);
-        render_list(f, app, chunks[0], home);
-        f.render_widget(detail_pane(app, home), chunks[1]);
+            .split(area)
     } else {
-        let chunks = Layout::default()
+        Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(area);
-        render_list(f, app, chunks[0], home);
-        f.render_widget(info_bar(app), chunks[1]);
+            .split(area)
+    };
+    (chunks[0], chunks[1], wide)
+}
+
+/// Area inside the list's border where rows are drawn (for mouse hit-testing).
+pub fn list_inner(area: Rect) -> Rect {
+    Block::default().borders(Borders::ALL).inner(split(area).0)
+}
+
+pub fn render_with_home(f: &mut Frame, app: &mut App, area: Rect, home: Option<&Path>) {
+    let (list, side, wide) = split(area);
+    render_list(f, app, list, home);
+    if wide {
+        f.render_widget(detail_pane(app, home), side);
+    } else {
+        f.render_widget(info_bar(app), side);
     }
 }
 

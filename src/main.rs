@@ -9,7 +9,8 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
+use crossterm::execute;
 use ratatui::{backend::Backend, Terminal};
 
 use crate::cli::Cli;
@@ -22,7 +23,7 @@ use crate::core::{
 use crate::tui::theme::Theme;
 use crate::tui::{
     app::{App, AppState, Tab},
-    events::{handle_key, Action},
+    events::{handle_key, handle_mouse, Action},
     views,
 };
 use clap::Parser;
@@ -142,7 +143,20 @@ fn main() -> anyhow::Result<()> {
 
     // ratatui::init installs a panic hook that restores the terminal.
     let mut terminal = ratatui::init();
+    let mouse = !cli.no_mouse;
+    if mouse {
+        let _ = execute!(io::stdout(), EnableMouseCapture);
+        // ratatui's hook restores raw mode and the screen but not mouse capture.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = execute!(io::stdout(), DisableMouseCapture);
+            previous(info);
+        }));
+    }
     let result = run_app(&mut terminal, &mut app, &mut runtime);
+    if mouse {
+        let _ = execute!(io::stdout(), DisableMouseCapture);
+    }
     ratatui::restore();
     Ok(result?)
 }
@@ -190,17 +204,23 @@ fn run_app<B: Backend>(
     loop {
         runtime.pump_scan(app);
         runtime.pump_clean(app);
-        terminal.draw(|f| views::render(f, app))?;
+        terminal.draw(|f| {
+            app.viewport = f.area();
+            views::render(f, app)
+        })?;
 
         let tick = if runtime.busy() { 50 } else { 250 };
         if event::poll(Duration::from_millis(tick))? {
-            if let Event::Key(key) = event::read()? {
-                match handle_key(app, key) {
-                    Action::Quit => return Ok(()),
-                    Action::StartCleaning => runtime.start_clean(app),
-                    Action::Rescan => runtime.start_scan(app),
-                    Action::None => {}
-                }
+            let action = match event::read()? {
+                Event::Key(key) => handle_key(app, key),
+                Event::Mouse(mouse) => handle_mouse(app, mouse),
+                _ => Action::None,
+            };
+            match action {
+                Action::Quit => return Ok(()),
+                Action::StartCleaning => runtime.start_clean(app),
+                Action::Rescan => runtime.start_scan(app),
+                Action::None => {}
             }
         }
     }

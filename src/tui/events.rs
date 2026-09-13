@@ -1,5 +1,7 @@
-use crate::tui::app::{App, AppState, Tab};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crate::tui::app::{App, AppState, ResultRow, Tab};
+use crate::tui::views;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Position;
 
 /// What the event loop should do after a key press has been applied to `App`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,12 +105,51 @@ fn handle_confirming(app: &mut App, code: KeyCode) -> Action {
     }
 }
 
+/// Mouse input: click tab titles to switch, click a Results row to highlight
+/// it (click again to toggle), wheel to move. Modals ignore the mouse.
+pub fn handle_mouse(app: &mut App, ev: MouseEvent) -> Action {
+    if !matches!(app.app_state, AppState::Viewing | AppState::Filtering) {
+        return Action::None;
+    }
+    let on_results = app.active_tab == Tab::Results;
+    match ev.kind {
+        MouseEventKind::ScrollUp if on_results => app.previous(),
+        MouseEventKind::ScrollDown if on_results => app.next(),
+        MouseEventKind::Down(MouseButton::Left) => {
+            let pos = Position::new(ev.column, ev.row);
+            let chunks = views::layout(app.viewport);
+            if chunks.tabs.contains(pos) {
+                if let Some(tab) = views::tab_at(app.viewport, ev.column) {
+                    app.active_tab = tab;
+                }
+            } else if on_results {
+                let inner = views::results_list_inner(app);
+                if inner.contains(pos) {
+                    let row = (ev.row - inner.y) as usize + app.state.offset();
+                    click_row(app, row);
+                }
+            }
+        }
+        _ => {}
+    }
+    Action::None
+}
+
+fn click_row(app: &mut App, row: usize) {
+    match app.rendered_rows.get(row) {
+        None | Some(ResultRow::EmptyLine) => {}
+        Some(_) if app.state.selected() == Some(row) => app.toggle_selection(),
+        Some(_) => app.state.select(Some(row)),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::{CleanMode, CleanupItem, ItemStatus};
     use crate::tui::app::{CleanSummary, SortMode};
     use crossterm::event::KeyModifiers;
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
     use std::path::PathBuf;
 
     fn key(c: KeyCode) -> KeyEvent {
@@ -239,6 +280,77 @@ mod tests {
         handle_key(&mut app, key(KeyCode::Char('t')));
         assert_eq!(app.theme.name, "nord");
         assert_eq!(app.filter, "t");
+    }
+
+    fn click(x: u16, y: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn wheel(kind: MouseEventKind) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn app_with_viewport() -> App {
+        let mut app = app_with_item();
+        app.viewport = Rect::new(0, 0, 120, 40);
+        app.active_tab = Tab::Results;
+        app
+    }
+
+    #[test]
+    fn clicking_a_tab_title_switches_tab() {
+        let mut app = app_with_viewport();
+        let x = crate::tui::views::tab_hit_test_column(Tab::Help);
+        handle_mouse(&mut app, click(x, 1));
+        assert_eq!(app.active_tab, Tab::Help);
+        let x = crate::tui::views::tab_hit_test_column(Tab::Dashboard);
+        handle_mouse(&mut app, click(x, 1));
+        assert_eq!(app.active_tab, Tab::Dashboard);
+    }
+
+    #[test]
+    fn clicking_a_row_highlights_it_and_clicking_again_toggles() {
+        let mut app = app_with_viewport();
+        // rows: header A (0), item a (1); list inner starts at body.y + 1
+        let list = crate::tui::views::results_list_inner(&app);
+        let header_y = list.y;
+        let item_y = list.y + 1;
+        handle_mouse(&mut app, click(list.x + 2, header_y));
+        assert_eq!(app.highlighted_category().as_deref(), Some("A"));
+        assert!(app.selected_item().is_none());
+        handle_mouse(&mut app, click(list.x + 2, item_y));
+        assert_eq!(app.selected_item().unwrap().name, "a");
+        assert!(!app.items[0].selected);
+        handle_mouse(&mut app, click(list.x + 2, item_y));
+        assert!(
+            app.items[0].selected,
+            "second click on highlighted row toggles"
+        );
+    }
+
+    #[test]
+    fn wheel_moves_highlight_and_clicks_are_ignored_while_confirming() {
+        let mut app = app_with_viewport();
+        let before = app.state.selected();
+        handle_mouse(&mut app, wheel(MouseEventKind::ScrollUp));
+        assert_ne!(app.state.selected(), before);
+        handle_mouse(&mut app, wheel(MouseEventKind::ScrollDown));
+        assert_eq!(app.state.selected(), before);
+
+        app.app_state = AppState::Confirming;
+        let x = crate::tui::views::tab_hit_test_column(Tab::Help);
+        handle_mouse(&mut app, click(x, 1));
+        assert_eq!(app.active_tab, Tab::Results);
     }
 
     #[test]

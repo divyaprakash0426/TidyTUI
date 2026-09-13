@@ -123,6 +123,7 @@ the five **Largest Items**.
 | `Enter` | Clean selected items (asks for confirmation) |
 | `y` / `n` / `Esc` | Confirm / cancel the cleanup dialog |
 | `q`     | Quit |
+| Mouse   | Click a tab title to switch; click a row to highlight it, click again to toggle; scroll wheel moves. `--no-mouse` disables this so the terminal can select text. |
 
 The scan runs in the background, so the interface appears immediately and the
 footer shows `⟳ Scanning n/m` until every location has been checked.

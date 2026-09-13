@@ -33,7 +33,15 @@ pub(crate) mod test_util {
     }
 }
 
-pub fn render(f: &mut Frame, app: &mut App) {
+/// The three fixed regions of the screen. Also used for mouse hit-testing,
+/// so rendering and input agree on where things are.
+pub struct Chunks {
+    pub tabs: Rect,
+    pub body: Rect,
+    pub footer: Rect,
+}
+
+pub fn layout(area: Rect) -> Chunks {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -41,7 +49,55 @@ pub fn render(f: &mut Frame, app: &mut App) {
             Constraint::Min(0),
             Constraint::Length(4),
         ])
-        .split(f.area());
+        .split(area);
+    Chunks {
+        tabs: chunks[0],
+        body: chunks[1],
+        footer: chunks[2],
+    }
+}
+
+const TAB_TITLES: [(&str, Tab); 3] = [
+    (" [1] Dashboard ", Tab::Dashboard),
+    (" [2] Results ", Tab::Results),
+    (" [3] Help ", Tab::Help),
+];
+
+/// Column span of each tab title as ratatui's `Tabs` lays them out:
+/// border, then per tab `" " title " "` separated by a one-cell divider.
+fn tab_spans(tabs_area: Rect) -> impl Iterator<Item = (std::ops::Range<u16>, Tab)> {
+    let mut x = tabs_area.x + 1;
+    TAB_TITLES.into_iter().map(move |(title, tab)| {
+        let start = x + 1;
+        let width = title.chars().count() as u16;
+        x += width + 3;
+        (start..start + width, tab)
+    })
+}
+
+pub fn tab_at(viewport: Rect, x: u16) -> Option<Tab> {
+    tab_spans(layout(viewport).tabs)
+        .find(|(range, _)| range.contains(&x))
+        .map(|(_, tab)| tab)
+}
+
+/// Inner area of the Results list (inside its border) for the current viewport.
+pub fn results_list_inner(app: &App) -> Rect {
+    results::list_inner(layout(app.viewport).body)
+}
+
+/// First column of the tab's word (after the `[n] ` prefix) on a viewport at x = 0.
+#[cfg(test)]
+pub fn tab_hit_test_column(tab: Tab) -> u16 {
+    tab_spans(layout(Rect::new(0, 0, 120, 40)).tabs)
+        .find(|(_, t)| *t == tab)
+        .map(|(range, _)| range.start + 5)
+        .unwrap()
+}
+
+pub fn render(f: &mut Frame, app: &mut App) {
+    let Chunks { tabs, body, footer } = layout(f.area());
+    let chunks = [tabs, body, footer];
 
     render_tabs(f, app, chunks[0]);
 
@@ -79,7 +135,7 @@ fn render_active_tab(f: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
     let th = app.theme;
-    let titles = vec![" [1] Dashboard ", " [2] Results ", " [3] Help "];
+    let titles: Vec<&str> = TAB_TITLES.iter().map(|(t, _)| *t).collect();
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title(" TidyTUI "))
         .select(match app.active_tab {
@@ -231,6 +287,24 @@ mod tests {
         app.dry_run = true;
         let s = render_to_string(120, 24, |f| render(f, &mut app));
         assert!(!s.contains("selected item needs root"), "{s}");
+    }
+
+    #[test]
+    fn tab_hit_columns_land_on_the_rendered_titles() {
+        let mut app = app_with_item();
+        let s = render_to_string(120, 24, |f| render(f, &mut app));
+        let tabs_line = s.lines().nth(1).unwrap();
+        for (tab, word) in [
+            (Tab::Dashboard, "Dashboard"),
+            (Tab::Results, "Results"),
+            (Tab::Help, "Help"),
+        ] {
+            let x = tab_hit_test_column(tab) as usize;
+            let cell: String = tabs_line.chars().skip(x).take(word.len()).collect();
+            assert_eq!(cell, word, "{tabs_line}");
+            assert_eq!(tab_at(Rect::new(0, 0, 120, 40), x as u16), Some(tab));
+        }
+        assert_eq!(tab_at(Rect::new(0, 0, 120, 40), 119), None);
     }
 
     #[test]
