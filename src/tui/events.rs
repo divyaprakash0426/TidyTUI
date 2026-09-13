@@ -7,6 +7,7 @@ pub enum Action {
     None,
     Quit,
     StartCleaning,
+    Rescan,
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
@@ -18,8 +19,31 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         AppState::Viewing => handle_viewing(app, key.code),
         AppState::Confirming => handle_confirming(app, key.code),
         AppState::Cleaning { .. } => Action::None,
+        AppState::Filtering => handle_filtering(app, key.code),
         AppState::Summary(_) => handle_summary(app, key.code),
     }
+}
+
+fn handle_filtering(app: &mut App, code: KeyCode) -> Action {
+    match code {
+        KeyCode::Enter => app.app_state = AppState::Viewing,
+        KeyCode::Esc => {
+            app.set_filter(String::new());
+            app.app_state = AppState::Viewing;
+        }
+        KeyCode::Backspace => {
+            let mut f = app.filter.clone();
+            f.pop();
+            app.set_filter(f);
+        }
+        KeyCode::Char(c) => {
+            let mut f = app.filter.clone();
+            f.push(c);
+            app.set_filter(f);
+        }
+        _ => {}
+    }
+    Action::None
 }
 
 fn handle_summary(app: &mut App, code: KeyCode) -> Action {
@@ -42,8 +66,23 @@ fn handle_viewing(app: &mut App, code: KeyCode) -> Action {
         KeyCode::Char('l') | KeyCode::Right | KeyCode::Tab => app.next_tab(),
         KeyCode::Char('h') | KeyCode::Left | KeyCode::BackTab => app.previous_tab(),
         KeyCode::Char(' ') => app.toggle_selection(),
+        KeyCode::Char('a') => app.select_all(true),
+        KeyCode::Char('A') => app.select_all(false),
+        KeyCode::Char('z') => app.toggle_collapse(),
+        KeyCode::Char('Z') => app.toggle_collapse_all(),
+        KeyCode::Char('s') => app.cycle_sort(),
+        KeyCode::Char('r') => {
+            if !app.is_scanning() {
+                return Action::Rescan;
+            }
+        }
+        KeyCode::Char('/') => {
+            app.active_tab = Tab::Results;
+            app.app_state = AppState::Filtering;
+        }
+        KeyCode::Esc => app.set_filter(String::new()),
         KeyCode::Enter => {
-            if app.selected_count() > 0 {
+            if app.selected_count() > 0 && !app.is_scanning() {
                 app.app_state = AppState::Confirming;
             }
         }
@@ -67,6 +106,7 @@ fn handle_confirming(app: &mut App, code: KeyCode) -> Action {
 mod tests {
     use super::*;
     use crate::core::{CleanMode, CleanupItem, ItemStatus};
+    use crate::tui::app::{CleanSummary, SortMode};
     use crossterm::event::KeyModifiers;
     use std::path::PathBuf;
 
@@ -154,12 +194,117 @@ mod tests {
     }
 
     #[test]
-    fn j_k_navigate_items() {
+    fn j_k_navigate_between_header_and_item() {
         let mut app = app_with_item();
-        let start = app.state.selected();
+        // rows: [H(A), I0, Empty]
+        assert_eq!(app.state.selected(), Some(1));
         handle_key(&mut app, key(KeyCode::Char('j')));
-        assert_eq!(app.state.selected(), start, "single item wraps to itself");
+        assert_eq!(app.state.selected(), Some(0), "wraps onto the header");
         handle_key(&mut app, key(KeyCode::Up));
-        assert_eq!(app.state.selected(), start);
+        assert_eq!(app.state.selected(), Some(1));
+    }
+
+    #[test]
+    fn a_selects_all_and_shift_a_clears() {
+        let mut app = app_with_item();
+        handle_key(&mut app, key(KeyCode::Char('a')));
+        assert_eq!(app.selected_count(), 1);
+        handle_key(&mut app, key(KeyCode::Char('A')));
+        assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn z_collapses_category_and_shift_z_collapses_all() {
+        let mut app = app_with_item();
+        handle_key(&mut app, key(KeyCode::Char('z')));
+        assert!(app.collapsed.contains("A"));
+        handle_key(&mut app, key(KeyCode::Char('Z')));
+        assert!(
+            app.collapsed.is_empty(),
+            "Z toggles all off when any collapsed"
+        );
+    }
+
+    #[test]
+    fn s_cycles_sort_mode() {
+        let mut app = app_with_item();
+        handle_key(&mut app, key(KeyCode::Char('s')));
+        assert_eq!(app.sort, SortMode::SizeDesc);
+    }
+
+    #[test]
+    fn r_requests_rescan_only_when_idle() {
+        let mut app = app_with_item();
+        assert_eq!(
+            handle_key(&mut app, key(KeyCode::Char('r'))),
+            Action::Rescan
+        );
+        app.begin_scan(3);
+        assert_eq!(handle_key(&mut app, key(KeyCode::Char('r'))), Action::None);
+    }
+
+    #[test]
+    fn enter_is_ignored_while_scanning() {
+        let mut app = app_with_item();
+        app.items[0].selected = true;
+        app.begin_scan(1);
+        app.items.push(CleanupItem {
+            name: "b".into(),
+            category: "A".into(),
+            description: None,
+            path: PathBuf::from("/y"),
+            size_bytes: 1,
+            file_count: 1,
+            selected: true,
+            status: ItemStatus::Scanned,
+            mode: CleanMode::Contents,
+        });
+        handle_key(&mut app, key(KeyCode::Enter));
+        assert_eq!(app.app_state, AppState::Viewing);
+    }
+
+    #[test]
+    fn slash_enters_filter_mode_and_typing_filters_live() {
+        let mut app = app_with_item();
+        handle_key(&mut app, key(KeyCode::Char('/')));
+        assert_eq!(app.app_state, AppState::Filtering);
+        assert_eq!(app.active_tab, Tab::Results);
+        handle_key(&mut app, key(KeyCode::Char('z')));
+        assert_eq!(app.filter, "z");
+        assert!(app.visible_item_indices().is_empty());
+        handle_key(&mut app, key(KeyCode::Backspace));
+        assert_eq!(app.filter, "");
+        handle_key(&mut app, key(KeyCode::Char('a')));
+        handle_key(&mut app, key(KeyCode::Enter));
+        assert_eq!(app.app_state, AppState::Viewing);
+        assert_eq!(app.filter, "a", "Enter keeps the filter");
+    }
+
+    #[test]
+    fn esc_in_filter_mode_clears_filter() {
+        let mut app = app_with_item();
+        handle_key(&mut app, key(KeyCode::Char('/')));
+        handle_key(&mut app, key(KeyCode::Char('a')));
+        handle_key(&mut app, key(KeyCode::Esc));
+        assert_eq!(app.app_state, AppState::Viewing);
+        assert_eq!(app.filter, "");
+    }
+
+    #[test]
+    fn esc_in_viewing_clears_active_filter() {
+        let mut app = app_with_item();
+        app.set_filter("a".into());
+        handle_key(&mut app, key(KeyCode::Esc));
+        assert_eq!(app.filter, "");
+    }
+
+    #[test]
+    fn summary_dismisses_on_enter_esc_or_q() {
+        for code in [KeyCode::Enter, KeyCode::Esc, KeyCode::Char('q')] {
+            let mut app = app_with_item();
+            app.app_state = AppState::Summary(CleanSummary::default());
+            assert_eq!(handle_key(&mut app, key(code)), Action::None);
+            assert_eq!(app.app_state, AppState::Viewing);
+        }
     }
 }

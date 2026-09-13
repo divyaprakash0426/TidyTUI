@@ -1,90 +1,153 @@
 mod core;
 mod tui;
 
-use std::{io, time::Duration};
+use std::{
+    io,
+    sync::mpsc::{Receiver, TryRecvError},
+    time::Duration,
+};
 
 use crossterm::event::{self, Event};
 use ratatui::{backend::Backend, Terminal};
 
-use crate::core::{cleaner, discovery, registry, scanner, ItemStatus};
+use crate::core::{
+    cleaner::{self, CleanEvent},
+    discovery, registry,
+    scanner::{self, ScanEvent},
+    ItemStatus,
+};
 use crate::tui::{
     app::{App, AppState, Tab},
     events::{handle_key, Action},
     views,
 };
 
+/// Background work the event loop pumps every frame.
+#[derive(Default)]
+struct Runtime {
+    scan_rx: Option<Receiver<ScanEvent>>,
+    clean_rx: Option<Receiver<CleanEvent>>,
+}
+
+impl Runtime {
+    fn busy(&self) -> bool {
+        self.scan_rx.is_some() || self.clean_rx.is_some()
+    }
+
+    fn start_scan(&mut self, app: &mut App) {
+        app.begin_scan(app.targets.len());
+        self.scan_rx = Some(scanner::spawn_scan(app.targets.clone()));
+    }
+
+    fn start_clean(&mut self, app: &mut App) {
+        let jobs: Vec<(usize, core::CleanupItem)> = app
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.selected && !matches!(i.status, ItemStatus::Deleted))
+            .map(|(idx, i)| (idx, i.clone()))
+            .collect();
+        app.app_state = AppState::Cleaning {
+            current: 0,
+            total: jobs.len(),
+            item_name: String::new(),
+        };
+        self.clean_rx = Some(cleaner::spawn_clean(jobs, app.dry_run));
+    }
+
+    /// Drains pending scan events without blocking.
+    fn pump_scan(&mut self, app: &mut App) {
+        let Some(rx) = &self.scan_rx else { return };
+        let mut done = false;
+        loop {
+            match rx.try_recv() {
+                Ok(ScanEvent::Found(item)) => app.push_item(item),
+                Ok(ScanEvent::Missing) => app.note_missing(),
+                Ok(ScanEvent::Finished) | Err(TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+        if done {
+            app.finish_scan();
+            self.scan_rx = None;
+        }
+    }
+
+    /// Drains pending clean events without blocking.
+    fn pump_clean(&mut self, app: &mut App) {
+        let Some(rx) = &self.clean_rx else { return };
+        let mut done = false;
+        loop {
+            match rx.try_recv() {
+                Ok(CleanEvent::Started { idx, name }) => {
+                    if let AppState::Cleaning {
+                        current, item_name, ..
+                    } = &mut app.app_state
+                    {
+                        *current = idx + 1;
+                        *item_name = name;
+                    }
+                }
+                Ok(CleanEvent::Finished { idx, status }) => app.apply_clean_result(idx, status),
+                Ok(CleanEvent::Done) | Err(TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+        if done {
+            let summary = app.build_summary();
+            app.cleanup_finished();
+            app.app_state = AppState::Summary(summary);
+            app.active_tab = Tab::Results;
+            self.clean_rx = None;
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
-    // Load config and scan before touching the terminal so that errors print
-    // normally instead of inside raw mode.
+    // Load config before touching the terminal so that errors print normally
+    // instead of inside raw mode.
     let os_type = discovery::detect_os();
     let definitions = registry::load_definitions()?;
-    let targets = registry::filter_rules(&definitions, &os_type);
-    let items = scanner::scan_targets(targets);
 
     let mut app = App::new();
-    app.set_items(items);
+    app.targets = registry::filter_rules(&definitions, &os_type);
+
+    let mut runtime = Runtime::default();
+    runtime.start_scan(&mut app);
 
     // ratatui::init installs a panic hook that restores the terminal.
     let mut terminal = ratatui::init();
-    let result = run_app(&mut terminal, &mut app);
+    let result = run_app(&mut terminal, &mut app, &mut runtime);
     ratatui::restore();
     Ok(result?)
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
+fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut App,
+    runtime: &mut Runtime,
+) -> io::Result<()> {
     loop {
+        runtime.pump_scan(app);
+        runtime.pump_clean(app);
         terminal.draw(|f| views::render(f, app))?;
 
-        if matches!(app.app_state, AppState::Cleaning { .. }) {
-            run_cleaning(terminal, app)?;
-            continue;
-        }
-
-        if event::poll(Duration::from_millis(250))? {
+        let tick = if runtime.busy() { 50 } else { 250 };
+        if event::poll(Duration::from_millis(tick))? {
             if let Event::Key(key) = event::read()? {
                 match handle_key(app, key) {
                     Action::Quit => return Ok(()),
-                    Action::StartCleaning => {
-                        app.app_state = AppState::Cleaning {
-                            current: 0,
-                            total: app.selected_count(),
-                            item_name: String::new(),
-                        };
-                    }
+                    Action::StartCleaning => runtime.start_clean(app),
+                    Action::Rescan => runtime.start_scan(app),
                     Action::None => {}
                 }
             }
         }
     }
-}
-
-fn run_cleaning<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
-    let indices: Vec<usize> = app
-        .items
-        .iter()
-        .enumerate()
-        .filter(|(_, i)| i.selected && !matches!(i.status, ItemStatus::Deleted))
-        .map(|(idx, _)| idx)
-        .collect();
-    let total = indices.len();
-    let dry_run = app.dry_run;
-
-    for (n, &idx) in indices.iter().enumerate() {
-        app.app_state = AppState::Cleaning {
-            current: n + 1,
-            total,
-            item_name: app.items[idx].name.clone(),
-        };
-        terminal.draw(|f| views::render(f, app))?;
-
-        // clean_item records a Failed status on the item itself; the returned
-        // error carries the same message, so it is intentionally not re-raised.
-        let _ = cleaner::clean_item(&mut app.items[idx], dry_run);
-        std::thread::sleep(Duration::from_millis(120));
-    }
-
-    app.cleanup_finished();
-    app.app_state = AppState::Viewing;
-    app.active_tab = Tab::Results;
-    Ok(())
 }

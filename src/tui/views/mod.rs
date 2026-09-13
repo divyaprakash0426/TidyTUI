@@ -26,7 +26,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_tabs(f, app, chunks[0]);
 
     match &app.app_state {
-        AppState::Viewing => render_active_tab(f, app, chunks[1]),
+        AppState::Viewing | AppState::Filtering => render_active_tab(f, app, chunks[1]),
         AppState::Confirming => {
             render_active_tab(f, app, chunks[1]);
             modals::render_confirm(f, app);

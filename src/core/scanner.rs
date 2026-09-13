@@ -71,11 +71,15 @@ pub fn spawn_scan(targets: Vec<Target>) -> Receiver<ScanEvent> {
     rx
 }
 
+/// Blocking scan: collects everything `spawn_scan` finds.
+#[cfg_attr(not(test), allow(dead_code))] // used by the CLI in a later phase
 pub fn scan_targets(targets: Vec<Target>) -> Vec<CleanupItem> {
-    let home = dirs::home_dir();
-    targets
-        .into_par_iter()
-        .filter_map(|t| scan_target(t, home.as_deref()))
+    spawn_scan(targets)
+        .into_iter()
+        .filter_map(|ev| match ev {
+            ScanEvent::Found(item) => Some(item),
+            _ => None,
+        })
         .collect()
 }
 

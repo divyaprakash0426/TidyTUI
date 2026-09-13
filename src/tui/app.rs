@@ -1,6 +1,7 @@
 use crate::core::registry::Target;
 use crate::core::{CleanupItem, ItemStatus};
 use ratatui::widgets::ListState;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -36,7 +37,27 @@ pub enum AppState {
         total: usize,
         item_name: String,
     },
+    /// Typing into the `/` filter prompt.
+    Filtering,
     Summary(CleanSummary),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SortMode {
+    #[default]
+    Default,
+    SizeDesc,
+    NameAsc,
+}
+
+impl SortMode {
+    pub fn next(self) -> SortMode {
+        match self {
+            SortMode::Default => SortMode::SizeDesc,
+            SortMode::SizeDesc => SortMode::NameAsc,
+            SortMode::NameAsc => SortMode::Default,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -57,6 +78,11 @@ pub struct App {
     /// Resolved targets for the current OS; kept so a rescan can be started.
     pub targets: Vec<Target>,
     pub scan: ScanProgress,
+    /// Case-insensitive substring filter over item name and path.
+    pub filter: String,
+    pub sort: SortMode,
+    /// Categories whose items are hidden in the results list.
+    pub collapsed: HashSet<String>,
 }
 
 impl App {
@@ -74,6 +100,9 @@ impl App {
                 finished: true,
                 ..ScanProgress::default()
             },
+            filter: String::new(),
+            sort: SortMode::default(),
+            collapsed: HashSet::new(),
         }
     }
 
@@ -165,22 +194,101 @@ impl App {
         summary
     }
 
+    fn item_matches_filter(&self, item: &CleanupItem) -> bool {
+        if self.filter.is_empty() {
+            return true;
+        }
+        let needle = self.filter.to_lowercase();
+        item.name.to_lowercase().contains(&needle)
+            || item.path.to_string_lossy().to_lowercase().contains(&needle)
+    }
+
+    /// Indices of items that pass the filter, in display order (sorted within
+    /// each category, categories alphabetical). Ignores collapsing.
+    pub fn visible_item_indices(&self) -> Vec<usize> {
+        let mut categories: Vec<&str> = self
+            .items
+            .iter()
+            .filter(|i| self.item_matches_filter(i))
+            .map(|i| i.category.as_str())
+            .collect();
+        categories.sort_unstable();
+        categories.dedup();
+
+        let mut out = Vec::new();
+        for cat in categories {
+            out.extend(self.sorted_indices_in(cat));
+        }
+        out
+    }
+
+    fn sorted_indices_in(&self, category: &str) -> Vec<usize> {
+        let mut idxs: Vec<usize> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.category == category && self.item_matches_filter(i))
+            .map(|(idx, _)| idx)
+            .collect();
+        match self.sort {
+            SortMode::Default => {}
+            SortMode::SizeDesc => {
+                idxs.sort_by(|a, b| self.items[*b].size_bytes.cmp(&self.items[*a].size_bytes))
+            }
+            SortMode::NameAsc => idxs.sort_by(|a, b| {
+                self.items[*a]
+                    .name
+                    .to_lowercase()
+                    .cmp(&self.items[*b].name.to_lowercase())
+            }),
+        }
+        idxs
+    }
+
     fn calculate_rendered_rows(&mut self) {
-        let mut rows = Vec::new();
-        let mut categories: Vec<String> = self.items.iter().map(|i| i.category.clone()).collect();
+        let mut categories: Vec<String> = self
+            .items
+            .iter()
+            .filter(|i| self.item_matches_filter(i))
+            .map(|i| i.category.clone())
+            .collect();
         categories.sort();
         categories.dedup();
 
+        let mut rows = Vec::new();
         for cat in categories {
             rows.push(ResultRow::CategoryHeader(cat.clone()));
-            for (idx, item) in self.items.iter().enumerate() {
-                if item.category == cat {
-                    rows.push(ResultRow::Item(idx));
-                }
+            if !self.collapsed.contains(&cat) {
+                rows.extend(
+                    self.sorted_indices_in(&cat)
+                        .into_iter()
+                        .map(ResultRow::Item),
+                );
             }
             rows.push(ResultRow::EmptyLine);
         }
         self.rendered_rows = rows;
+        self.clamp_selection();
+    }
+
+    /// Keeps the highlight on a navigable row after rows are rebuilt.
+    fn clamp_selection(&mut self) {
+        if self.rendered_rows.is_empty() {
+            self.state.select(None);
+            return;
+        }
+        let sel = self.state.selected().unwrap_or(0);
+        let sel = sel.min(self.rendered_rows.len() - 1);
+        if matches!(self.rendered_rows[sel], ResultRow::EmptyLine) {
+            self.state.select(Some(sel));
+            self.previous();
+        } else {
+            self.state.select(Some(sel));
+        }
+    }
+
+    fn is_navigable(&self, row: usize) -> bool {
+        !matches!(self.rendered_rows[row], ResultRow::EmptyLine)
     }
 
     pub fn next(&mut self) {
@@ -188,18 +296,14 @@ impl App {
         if len == 0 {
             return;
         }
-
         let current = self.state.selected().unwrap_or(len - 1);
         let mut next = (current + 1) % len;
-
-        // Skip non-item rows
         let mut count = 0;
-        while !matches!(self.rendered_rows[next], ResultRow::Item(_)) && count < len {
+        while !self.is_navigable(next) && count < len {
             next = (next + 1) % len;
             count += 1;
         }
-
-        if matches!(self.rendered_rows[next], ResultRow::Item(_)) {
+        if self.is_navigable(next) {
             self.state.select(Some(next));
         }
     }
@@ -209,26 +313,94 @@ impl App {
         if len == 0 {
             return;
         }
-
         let current = self.state.selected().unwrap_or(0);
         let mut prev = if current == 0 { len - 1 } else { current - 1 };
-
-        // Skip non-item rows
         let mut count = 0;
-        while !matches!(self.rendered_rows[prev], ResultRow::Item(_)) && count < len {
+        while !self.is_navigable(prev) && count < len {
             prev = if prev == 0 { len - 1 } else { prev - 1 };
             count += 1;
         }
-
-        if matches!(self.rendered_rows[prev], ResultRow::Item(_)) {
+        if self.is_navigable(prev) {
             self.state.select(Some(prev));
         }
     }
 
+    /// Space: on an item toggles it; on a header toggles every visible item
+    /// in that category (all on unless every one is already selected).
     pub fn toggle_selection(&mut self) {
-        if let Some(idx) = self.selected_index() {
-            self.items[idx].selected = !self.items[idx].selected;
+        match self.highlighted_row().cloned() {
+            Some(ResultRow::Item(idx)) => self.items[idx].selected = !self.items[idx].selected,
+            Some(ResultRow::CategoryHeader(cat)) => {
+                let idxs = self.sorted_indices_in(&cat);
+                let all_on = idxs.iter().all(|i| self.items[*i].selected);
+                for i in idxs {
+                    self.items[i].selected = !all_on;
+                }
+            }
+            _ => {}
         }
+    }
+
+    pub fn select_all(&mut self, on: bool) {
+        for idx in self.visible_item_indices() {
+            self.items[idx].selected = on;
+        }
+    }
+
+    pub fn highlighted_row(&self) -> Option<&ResultRow> {
+        self.rendered_rows.get(self.state.selected()?)
+    }
+
+    /// Category of the highlighted row (header or item).
+    pub fn highlighted_category(&self) -> Option<String> {
+        match self.highlighted_row()? {
+            ResultRow::CategoryHeader(c) => Some(c.clone()),
+            ResultRow::Item(idx) => Some(self.items[*idx].category.clone()),
+            ResultRow::EmptyLine => None,
+        }
+    }
+
+    pub fn toggle_collapse(&mut self) {
+        let Some(cat) = self.highlighted_category() else {
+            return;
+        };
+        if !self.collapsed.remove(&cat) {
+            self.collapsed.insert(cat.clone());
+        }
+        self.calculate_rendered_rows();
+        let header = self
+            .rendered_rows
+            .iter()
+            .position(|r| matches!(r, ResultRow::CategoryHeader(c) if *c == cat));
+        if let Some(h) = header {
+            self.state.select(Some(h));
+        }
+    }
+
+    pub fn toggle_collapse_all(&mut self) {
+        let mut categories: Vec<String> = self.items.iter().map(|i| i.category.clone()).collect();
+        categories.sort();
+        categories.dedup();
+        if self.collapsed.is_empty() {
+            self.collapsed = categories.into_iter().collect();
+        } else {
+            self.collapsed.clear();
+        }
+        self.calculate_rendered_rows();
+    }
+
+    pub fn set_filter(&mut self, filter: String) {
+        self.filter = filter;
+        self.calculate_rendered_rows();
+        if self.state.selected().is_none() && !self.rendered_rows.is_empty() {
+            self.state.select(Some(0));
+            self.next();
+        }
+    }
+
+    pub fn cycle_sort(&mut self) {
+        self.sort = self.sort.next();
+        self.calculate_rendered_rows();
     }
 
     /// Index into `items` for the highlighted row, if it is an item row.
@@ -322,17 +494,121 @@ mod tests {
     }
 
     #[test]
-    fn next_and_previous_skip_headers_and_wrap() {
+    fn navigation_visits_headers_and_items_skipping_blank_lines() {
         let mut app = App::new();
         app.set_items(vec![item("a", "A", 1), item("b", "B", 1)]);
-        // rows: [H(A), I0, Empty, H(B), I1, Empty]
+        // rows: [H(A), I0, Empty, H(B), I1, Empty]; initial highlight = first item
         assert_eq!(app.state.selected(), Some(1));
+        app.next();
+        assert_eq!(app.state.selected(), Some(3), "lands on header B");
         app.next();
         assert_eq!(app.state.selected(), Some(4));
         app.next();
-        assert_eq!(app.state.selected(), Some(1));
+        assert_eq!(app.state.selected(), Some(0), "wraps to header A");
         app.previous();
         assert_eq!(app.state.selected(), Some(4));
+    }
+
+    #[test]
+    fn space_on_header_toggles_whole_category() {
+        let mut app = App::new();
+        app.set_items(vec![
+            item("a", "A", 1),
+            item("b", "A", 1),
+            item("c", "B", 1),
+        ]);
+        app.state.select(Some(0)); // header A
+        app.toggle_selection();
+        assert_eq!(app.selected_count(), 2);
+        app.toggle_selection();
+        assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn select_all_and_none() {
+        let mut app = App::new();
+        app.set_items(vec![item("a", "A", 1), item("b", "B", 1)]);
+        app.select_all(true);
+        assert_eq!(app.selected_count(), 2);
+        app.select_all(false);
+        assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn collapse_hides_items_but_keeps_header() {
+        let mut app = App::new();
+        app.set_items(vec![item("a", "A", 1), item("b", "A", 1)]);
+        app.toggle_collapse();
+        assert!(app.collapsed.contains("A"));
+        assert!(app
+            .rendered_rows
+            .iter()
+            .all(|r| !matches!(r, ResultRow::Item(_))));
+        assert!(matches!(app.rendered_rows[0], ResultRow::CategoryHeader(_)));
+        assert_eq!(app.state.selected(), Some(0), "highlight moves to header");
+        app.toggle_collapse();
+        assert!(app
+            .rendered_rows
+            .iter()
+            .any(|r| matches!(r, ResultRow::Item(_))));
+    }
+
+    #[test]
+    fn collapse_all_toggles_every_category() {
+        let mut app = App::new();
+        app.set_items(vec![item("a", "A", 1), item("b", "B", 1)]);
+        app.toggle_collapse_all();
+        assert_eq!(app.collapsed.len(), 2);
+        app.toggle_collapse_all();
+        assert!(app.collapsed.is_empty());
+    }
+
+    #[test]
+    fn filter_matches_name_or_path_case_insensitively() {
+        let mut app = App::new();
+        let mut p = item("Pip Cache", "Dev", 1);
+        p.path = PathBuf::from("/home/u/.cache/pip");
+        let mut n = item("NPM Cache", "Dev", 1);
+        n.path = PathBuf::from("/home/u/.npm");
+        app.set_items(vec![p, n, item("Trash", "System", 1)]);
+        app.set_filter("PIP".into());
+        assert_eq!(app.visible_item_indices(), vec![0]);
+        app.set_filter(".npm".into());
+        assert_eq!(app.visible_item_indices(), vec![1]);
+        assert!(!app
+            .rendered_rows
+            .iter()
+            .any(|r| matches!(r, ResultRow::CategoryHeader(c) if c == "System")));
+        app.set_filter(String::new());
+        assert_eq!(app.visible_item_indices().len(), 3);
+    }
+
+    #[test]
+    fn select_all_respects_filter() {
+        let mut app = App::new();
+        app.set_items(vec![item("pip", "A", 1), item("npm", "A", 1)]);
+        app.set_filter("pip".into());
+        app.select_all(true);
+        assert_eq!(app.selected_count(), 1);
+    }
+
+    #[test]
+    fn sort_cycles_and_orders_within_category() {
+        let mut app = App::new();
+        app.set_items(vec![
+            item("b", "A", 5),
+            item("a", "A", 50),
+            item("c", "A", 1),
+        ]);
+        app.cycle_sort();
+        assert_eq!(app.sort, SortMode::SizeDesc);
+        assert_eq!(app.visible_item_indices(), vec![1, 0, 2]);
+        app.cycle_sort();
+        assert_eq!(app.sort, SortMode::NameAsc);
+        assert_eq!(app.visible_item_indices(), vec![1, 0, 2]);
+        app.cycle_sort();
+        assert_eq!(app.sort, SortMode::Default);
+        assert_eq!(app.visible_item_indices(), vec![0, 1, 2]);
     }
 
     #[test]
