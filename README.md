@@ -11,6 +11,14 @@ TidyTUI is a lightweight, ncurses-style utility to scan your Linux system for ac
 
 ![Demo](assets/showcase/demo.gif)
 
+| Dashboard | Results |
+|:---:|:---:|
+| ![Dashboard](assets/showcase/dashboard.png) | ![Results](assets/showcase/results.png) |
+| **Confirm (dry-run)** | **Gruvbox theme** |
+| ![Confirm](assets/showcase/confirm.png) | ![Gruvbox theme](assets/showcase/theme-gruvbox.png) |
+
+Everything above runs in the default dry-run mode — the tape never deletes a file.
+
 ## 🚀 Features
 
 - **⚡ Blazingly Fast**: Powered by `rayon` for multi-threaded scanning and `walkdir` for efficient traversal. The interface opens instantly and fills in as the scan streams results.
@@ -211,6 +219,15 @@ to clean them.
 ## 🤝 Contributing
 
 Contributions are welcome! Please open an issue or submit a PR.
+
+```bash
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+```
+
+The showcase GIF and screenshots are generated with [VHS](https://github.com/charmbracelet/vhs)
+from `assets/vhs/demo.tape`; see the comments at the top of the tape.
 
 ## 📜 License
 
