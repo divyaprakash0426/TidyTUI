@@ -95,6 +95,10 @@ fn title(app: &App) -> String {
     if app.sort != SortMode::Default {
         t.push_str(&format!(" · sort: {}", app.sort.label()));
     }
+    let locked = app.items.iter().filter(|i| i.locked).count();
+    if locked > 0 {
+        t.push_str(&format!(" · {locked} need root"));
+    }
     t.push_str(") ");
     t
 }
@@ -127,8 +131,11 @@ fn mode_label(mode: CleanMode) -> &'static str {
     }
 }
 
-fn status_span(status: &ItemStatus) -> Span<'static> {
-    match status {
+fn status_span(item: &CleanupItem) -> Span<'static> {
+    match &item.status {
+        ItemStatus::Scanned if item.locked => {
+            Span::styled("needs root", Style::default().fg(Color::Red))
+        }
         ItemStatus::Scanned => Span::styled("scanned", Style::default().fg(Color::DarkGray)),
         ItemStatus::DryRun => Span::styled("would delete", Style::default().fg(Color::Cyan)),
         ItemStatus::Deleted => Span::styled("deleted", Style::default().fg(Color::Green)),
@@ -189,12 +196,21 @@ fn detail_pane(app: &App, home: Option<&Path>) -> Paragraph<'static> {
                     Span::raw(format!(" · {} files", item.file_count)),
                 ]),
                 Line::from(vec![label("Mode"), Span::raw(mode_label(item.mode))]),
-                Line::from(vec![label("Status"), status_span(&item.status)]),
+                Line::from(vec![label("Status"), status_span(item)]),
                 Line::from(vec![
                     label("Group"),
                     Span::styled(item.group_id.clone(), Style::default().fg(Color::DarkGray)),
                 ]),
             ];
+            if item.locked {
+                lines.push(Line::from(vec![
+                    label("Access"),
+                    Span::styled(
+                        "read-only — re-run with sudo to clean",
+                        Style::default().fg(Color::Red),
+                    ),
+                ]));
+            }
             if let Some(days) = item.keep_days {
                 lines.push(Line::from(vec![
                     label("Keeps"),
@@ -255,7 +271,7 @@ const MIN_PATH_COL: usize = 8;
 fn item_row<'a>(item: &'a CleanupItem, home: Option<&Path>, width: usize) -> ListItem<'a> {
     let checkbox = if item.selected { "[x] " } else { "[ ] " };
     let size = ByteSize(item.size_bytes).to_string();
-    let status = (item.status != ItemStatus::Scanned).then(|| status_span(&item.status));
+    let status = (item.status != ItemStatus::Scanned || item.locked).then(|| status_span(item));
     let status_width = status.as_ref().map_or(0, |s| s.width() + 2);
 
     // Path and status share what is left; the path keeps a minimum and the
@@ -347,6 +363,7 @@ mod tests {
             status,
             mode: CleanMode::Contents,
             keep_days: None,
+            locked: false,
         }
     }
 
@@ -374,6 +391,21 @@ mod tests {
         assert!(s.contains("~/.cache/pip"), "{s}");
         assert!(s.contains("2.0 MiB"), "{s}");
         assert!(s.contains("▾ Dev (1)"), "{s}");
+    }
+
+    #[test]
+    fn locked_item_shows_needs_root_in_row_title_and_details() {
+        let mut app = App::new();
+        let mut locked = item("Pacman", "/var/cache/pacman/pkg", 5, ItemStatus::Scanned);
+        locked.locked = true;
+        app.set_items(vec![
+            locked,
+            item("Pip", "/home/u/.cache/pip", 1, ItemStatus::Scanned),
+        ]);
+        let s = render_to_string(&mut app);
+        assert!(s.contains("needs root"), "{s}");
+        assert!(s.contains("1 need root"), "{s}");
+        assert!(s.contains("re-run with sudo"), "{s}");
     }
 
     #[test]

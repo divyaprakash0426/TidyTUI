@@ -518,6 +518,7 @@ mod tests {
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
             keep_days: None,
+            locked: false,
         }
     }
 

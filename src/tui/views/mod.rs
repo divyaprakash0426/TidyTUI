@@ -189,6 +189,7 @@ mod tests {
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
             keep_days: None,
+            locked: false,
         }]);
         app.active_tab = Tab::Results;
         app
@@ -221,6 +222,20 @@ mod tests {
         let s = render_to_string(120, 20, |f| render(f, &mut app));
         assert!(s.contains("Selected: 1"), "{s}");
         assert!(s.contains("DRY-RUN"), "{s}");
+    }
+
+    #[test]
+    fn confirm_modal_warns_about_locked_selection_in_danger_mode() {
+        let mut app = app_with_item();
+        app.items[0].locked = true;
+        app.items[0].selected = true;
+        app.dry_run = false;
+        app.app_state = AppState::Confirming;
+        let s = render_to_string(120, 24, |f| render(f, &mut app));
+        assert!(s.contains("1 selected item needs root"), "{s}");
+        app.dry_run = true;
+        let s = render_to_string(120, 24, |f| render(f, &mut app));
+        assert!(!s.contains("selected item needs root"), "{s}");
     }
 
     #[test]

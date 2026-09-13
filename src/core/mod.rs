@@ -6,6 +6,7 @@ pub mod cleaner;
 pub mod discovery;
 pub mod disk;
 pub mod paths;
+pub mod perms;
 pub mod policy;
 pub mod registry;
 pub mod scanner;
@@ -44,4 +45,6 @@ pub struct CleanupItem {
     pub mode: CleanMode,
     /// Only entries older than this many days are counted and removed.
     pub keep_days: Option<u64>,
+    /// The current user lacks permission to clean this (needs root).
+    pub locked: bool,
 }

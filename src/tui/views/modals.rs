@@ -65,6 +65,18 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
     }
 
     text.push(Line::from(""));
+    let locked = app.items.iter().filter(|i| i.selected && i.locked).count();
+    if locked > 0 && !app.dry_run {
+        let noun = if locked == 1 {
+            "item needs"
+        } else {
+            "items need"
+        };
+        text.push(Line::from(Span::styled(
+            format!("⚠ {locked} selected {noun} root and will fail"),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
     text.push(if app.dry_run {
         Line::from(Span::styled(
             "MODE: DRY-RUN (No files will be deleted)",

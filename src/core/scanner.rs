@@ -1,6 +1,6 @@
 use crate::core::paths::expand_tilde;
-use crate::core::policy;
 use crate::core::registry::Target;
+use crate::core::{perms, policy};
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use rayon::prelude::*;
 use std::path::Path;
@@ -67,6 +67,7 @@ pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
             return None;
         }
     }
+    let locked = !perms::can_clean(&path, target.mode);
     Some(CleanupItem {
         group_id: target.group_id,
         name: target.name,
@@ -79,6 +80,7 @@ pub fn scan_target(target: Target, home: Option<&Path>) -> Option<CleanupItem> {
         status: ItemStatus::Scanned,
         mode: target.mode,
         keep_days: target.keep_days,
+        locked,
     })
 }
 
@@ -153,6 +155,31 @@ mod tests {
         let mut t = target(dir.path().to_str().unwrap(), CleanMode::Dir);
         t.keep_days = Some(30);
         assert!(scan_target(t, None).is_none(), "fresh dir is not eligible");
+    }
+
+    #[test]
+    fn locked_reflects_whether_the_user_can_modify_the_target() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("f"), b"x").unwrap();
+        let ok = scan_target(
+            target(dir.path().to_str().unwrap(), CleanMode::Contents),
+            None,
+        )
+        .unwrap();
+        assert!(!ok.locked);
+
+        if crate::core::perms::is_root() {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
+        let ro = scan_target(
+            target(dir.path().to_str().unwrap(), CleanMode::Contents),
+            None,
+        )
+        .unwrap();
+        assert!(ro.locked);
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]

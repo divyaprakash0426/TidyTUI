@@ -128,6 +128,7 @@ mod tests {
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
             keep_days: None,
+            locked: false,
         }]);
         app
     }
@@ -262,6 +263,7 @@ mod tests {
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
             keep_days: None,
+            locked: false,
         });
         handle_key(&mut app, key(KeyCode::Enter));
         assert_eq!(app.app_state, AppState::Viewing);

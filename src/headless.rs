@@ -24,12 +24,13 @@ pub fn list_table(items: &[CleanupItem], home: Option<&Path>) -> String {
     for i in items {
         let _ = writeln!(
             out,
-            "{:<name_w$}  {:<group_w$}  {:>10}  {:>8}  {}",
+            "{:<name_w$}  {:<group_w$}  {:>10}  {:>8}  {}{}",
             i.name,
             i.group_id,
             ByteSize(i.size_bytes).to_string(),
             i.file_count,
-            shorten_home(&i.path, home)
+            shorten_home(&i.path, home),
+            if i.locked { "  (needs root)" } else { "" }
         );
     }
     let total: u64 = items.iter().map(|i| i.size_bytes).sum();
@@ -53,6 +54,7 @@ struct JsonItem<'a> {
     mode: crate::core::CleanMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     keep_days: Option<u64>,
+    locked: bool,
 }
 
 pub fn list_json(items: &[CleanupItem]) -> String {
@@ -67,6 +69,7 @@ pub fn list_json(items: &[CleanupItem]) -> String {
             file_count: i.file_count,
             mode: i.mode,
             keep_days: i.keep_days,
+            locked: i.locked,
         })
         .collect();
     serde_json::to_string_pretty(&rows).expect("serialising plain data cannot fail")
@@ -168,7 +171,18 @@ mod tests {
             status: ItemStatus::Scanned,
             mode: CleanMode::Contents,
             keep_days: None,
+            locked: false,
         }
+    }
+
+    #[test]
+    fn locked_items_are_flagged_in_table_and_json() {
+        let mut it = item("pkg", "Pacman", "/var/cache/pacman/pkg", 5);
+        it.locked = true;
+        let table = list_table(std::slice::from_ref(&it), None);
+        assert!(table.contains("(needs root)"), "{table}");
+        let json = list_json(std::slice::from_ref(&it));
+        assert!(json.contains("\"locked\": true"), "{json}");
     }
 
     #[test]
