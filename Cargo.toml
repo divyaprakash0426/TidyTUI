@@ -23,6 +23,9 @@ serde_yaml = "0.9.34"
 thiserror = "2.0.18"
 walkdir = "2.5.0"
 
+[dev-dependencies]
+tempfile = "3"
+
 [package.metadata.deb]
 maintainer = "Divyaprakash Dhurandhar <divyaprakash.0426@gmail.com>"
 copyright = "2024-2025 Divyaprakash Dhurandhar"

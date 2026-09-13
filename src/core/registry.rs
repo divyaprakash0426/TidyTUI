@@ -1,5 +1,6 @@
 use crate::core::discovery::OsType;
-use anyhow::Result;
+use crate::core::CleanMode;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -8,6 +9,12 @@ use std::path::Path;
 pub struct Rule {
     pub os: String,
     pub path: String,
+    #[serde(default)]
+    pub mode: CleanMode,
+}
+
+fn default_category() -> String {
+    "Other".to_string()
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -15,12 +22,29 @@ pub struct Group {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[serde(default = "default_category")]
+    pub category: String,
     pub rules: Vec<Rule>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Definitions {
     pub groups: Vec<Group>,
+}
+
+/// A single scannable path resolved from the definitions for the current OS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub group_id: String,
+    pub name: String,
+    pub category: String,
+    pub description: Option<String>,
+    pub path: String,
+    pub mode: CleanMode,
+}
+
+pub fn parse_definitions(yaml: &str) -> Result<Definitions> {
+    Ok(serde_yaml::from_str(yaml)?)
 }
 
 pub fn load_definitions() -> Result<Definitions> {
@@ -36,34 +60,102 @@ pub fn load_definitions() -> Result<Definitions> {
     // Try to find the first path that exists
     for path in paths {
         if path.exists() {
-            let content = fs::read_to_string(&path)?;
-            let definitions: Definitions = serde_yaml::from_str(&content)?;
-            return Ok(definitions);
+            let content =
+                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            return parse_definitions(&content)
+                .with_context(|| format!("parsing {}", path.display()));
         }
     }
 
     Err(anyhow::anyhow!(
-        "Changes definitions.yaml not found in any of the search paths."
+        "definitions.yaml not found. Searched: ./definitions.yaml, \
+         ~/.config/tidytui/definitions.yaml, /usr/share/tidytui/definitions.yaml"
     ))
 }
 
-pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<(String, String, String)> {
-    let mut cleanable_paths = Vec::new();
-    let os_id = match os_type {
+pub fn os_id(os_type: &OsType) -> &'static str {
+    match os_type {
         OsType::Arch => "arch",
         OsType::Ubuntu => "ubuntu",
         OsType::Debian => "debian",
         OsType::Fedora => "fedora",
         OsType::OpenSuse => "opensuse",
-        OsType::Unknown(_) => "any", // Default fallback if needed, or handle specifically
-    };
-
-    for group in &definitions.groups {
-        for rule in &group.rules {
-            if rule.os == os_id || rule.os == "any" {
-                cleanable_paths.push((group.name.clone(), group.name.clone(), rule.path.clone()));
-            }
-        }
+        OsType::Unknown(_) => "any",
     }
-    cleanable_paths
+}
+
+pub fn filter_rules(definitions: &Definitions, os_type: &OsType) -> Vec<Target> {
+    let os_id = os_id(os_type);
+    definitions
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .rules
+                .iter()
+                .filter(move |rule| rule.os == os_id || rule.os == "any")
+                .map(move |rule| Target {
+                    group_id: group.id.clone(),
+                    name: group.name.clone(),
+                    category: group.category.clone(),
+                    description: group.description.clone(),
+                    path: rule.path.clone(),
+                    mode: rule.mode,
+                })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::discovery::OsType;
+
+    const YAML: &str = r#"
+groups:
+  - id: pkg
+    name: Package Cache
+    category: System
+    rules:
+      - os: arch
+        path: /var/cache/pacman/pkg/
+        mode: contents
+      - os: ubuntu
+        path: /var/cache/apt/archives/
+  - id: npm
+    name: NPM Cache
+    description: Node cache
+    rules:
+      - os: any
+        path: ~/.npm
+        mode: dir
+"#;
+
+    #[test]
+    fn parses_optional_fields_with_defaults() {
+        let defs = parse_definitions(YAML).unwrap();
+        assert_eq!(defs.groups[0].category, "System");
+        assert_eq!(defs.groups[1].category, "Other");
+        assert_eq!(defs.groups[0].rules[1].mode, CleanMode::Contents);
+        assert_eq!(defs.groups[1].rules[0].mode, CleanMode::Dir);
+    }
+
+    #[test]
+    fn filters_by_os_and_any() {
+        let defs = parse_definitions(YAML).unwrap();
+        let targets = filter_rules(&defs, &OsType::Arch);
+        let paths: Vec<&str> = targets.iter().map(|t| t.path.as_str()).collect();
+        assert_eq!(paths, vec!["/var/cache/pacman/pkg/", "~/.npm"]);
+        assert_eq!(targets[0].category, "System");
+        assert_eq!(targets[1].description.as_deref(), Some("Node cache"));
+        assert_eq!(targets[1].mode, CleanMode::Dir);
+    }
+
+    #[test]
+    fn unknown_os_gets_only_any_rules() {
+        let defs = parse_definitions(YAML).unwrap();
+        let targets = filter_rules(&defs, &OsType::Unknown("nix".into()));
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].group_id, "npm");
+    }
 }
