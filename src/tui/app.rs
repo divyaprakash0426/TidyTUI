@@ -121,13 +121,33 @@ impl App {
     }
 
     pub fn toggle_selection(&mut self) {
-        if let Some(i) = self.state.selected() {
-            if i < self.rendered_rows.len() {
-                if let ResultRow::Item(item_idx) = self.rendered_rows[i] {
-                    self.items[item_idx].selected = !self.items[item_idx].selected;
-                }
-            }
+        if let Some(idx) = self.selected_index() {
+            self.items[idx].selected = !self.items[idx].selected;
         }
+    }
+
+    /// Index into `items` for the highlighted row, if it is an item row.
+    pub fn selected_index(&self) -> Option<usize> {
+        match self.rendered_rows.get(self.state.selected()?) {
+            Some(ResultRow::Item(idx)) => Some(*idx),
+            _ => None,
+        }
+    }
+
+    pub fn selected_item(&self) -> Option<&CleanupItem> {
+        self.selected_index().map(|idx| &self.items[idx])
+    }
+
+    pub fn selected_count(&self) -> usize {
+        self.items.iter().filter(|i| i.selected).count()
+    }
+
+    pub fn selected_size(&self) -> u64 {
+        self.items
+            .iter()
+            .filter(|i| i.selected)
+            .map(|i| i.size_bytes)
+            .sum()
     }
 
     pub fn toggle_dry_run(&mut self) {
@@ -152,14 +172,99 @@ impl App {
 
     pub fn cleanup_finished(&mut self) {
         use crate::core::ItemStatus;
-        // Keep only items that were not successfully deleted
+        // Deleted items vanish; DryRun/Failed stay so the user sees the outcome.
         self.items
             .retain(|i| !matches!(i.status, ItemStatus::Deleted));
+        for item in &mut self.items {
+            item.selected = false;
+        }
         self.total_size = self.items.iter().map(|i| i.size_bytes).sum();
         self.calculate_rendered_rows();
         self.state.select(Some(0));
         if !self.rendered_rows.is_empty() {
             self.next(); // Find first selectable item
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{CleanMode, ItemStatus};
+    use std::path::PathBuf;
+
+    fn item(name: &str, cat: &str, size: u64) -> CleanupItem {
+        CleanupItem {
+            name: name.into(),
+            category: cat.into(),
+            description: None,
+            path: PathBuf::from("/x"),
+            size_bytes: size,
+            file_count: 1,
+            selected: false,
+            status: ItemStatus::Scanned,
+            mode: CleanMode::Contents,
+        }
+    }
+
+    #[test]
+    fn set_items_groups_by_category_and_selects_first_item() {
+        let mut app = App::new();
+        app.set_items(vec![item("b", "B", 1), item("a", "A", 2)]);
+        assert!(matches!(app.rendered_rows[0], ResultRow::CategoryHeader(ref c) if c == "A"));
+        assert!(matches!(app.rendered_rows[1], ResultRow::Item(1)));
+        assert_eq!(app.state.selected(), Some(1));
+        assert_eq!(app.total_size, 3);
+    }
+
+    #[test]
+    fn next_and_previous_skip_headers_and_wrap() {
+        let mut app = App::new();
+        app.set_items(vec![item("a", "A", 1), item("b", "B", 1)]);
+        // rows: [H(A), I0, Empty, H(B), I1, Empty]
+        assert_eq!(app.state.selected(), Some(1));
+        app.next();
+        assert_eq!(app.state.selected(), Some(4));
+        app.next();
+        assert_eq!(app.state.selected(), Some(1));
+        app.previous();
+        assert_eq!(app.state.selected(), Some(4));
+    }
+
+    #[test]
+    fn toggle_selection_and_totals() {
+        let mut app = App::new();
+        app.set_items(vec![item("a", "A", 10), item("b", "A", 5)]);
+        app.toggle_selection();
+        assert_eq!(app.selected_count(), 1);
+        assert_eq!(app.selected_size(), 10);
+        assert_eq!(app.selected_item().unwrap().name, "a");
+    }
+
+    #[test]
+    fn empty_app_has_no_selected_item() {
+        let app = App::new();
+        assert!(app.selected_item().is_none());
+        assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn cleanup_finished_drops_deleted_keeps_dryrun_and_failed() {
+        let mut app = App::new();
+        let mut a = item("a", "A", 1);
+        a.status = ItemStatus::Deleted;
+        a.selected = true;
+        let mut b = item("b", "A", 2);
+        b.status = ItemStatus::DryRun;
+        b.selected = true;
+        let mut c = item("c", "A", 3);
+        c.status = ItemStatus::Failed("denied".into());
+        c.selected = true;
+        app.set_items(vec![a, b, c]);
+        app.cleanup_finished();
+        let names: Vec<&str> = app.items.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["b", "c"]);
+        assert!(app.items.iter().all(|i| !i.selected));
+        assert_eq!(app.total_size, 5);
     }
 }
