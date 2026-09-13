@@ -86,12 +86,14 @@ impl Runtime {
         let mut done = false;
         loop {
             match rx.try_recv() {
-                Ok(CleanEvent::Started { idx, name }) => {
+                // Jobs run sequentially, so each Started is the next ordinal;
+                // `idx` is the item's position in the list, not a job number.
+                Ok(CleanEvent::Started { name, .. }) => {
                     if let AppState::Cleaning {
                         current, item_name, ..
                     } = &mut app.app_state
                     {
-                        *current = idx + 1;
+                        *current += 1;
                         *item_name = name;
                     }
                 }
@@ -196,6 +198,36 @@ fn run_app<B: Backend>(
                     Action::None => {}
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn pump_clean_counts_jobs_not_item_indices() {
+        let mut app = App::new();
+        app.app_state = AppState::Cleaning {
+            current: 0,
+            total: 1,
+            item_name: String::new(),
+        };
+        let (tx, rx) = mpsc::channel();
+        let mut runtime = Runtime {
+            scan_rx: None,
+            clean_rx: Some(rx),
+        };
+        // Only the third item was selected: one job, whose item index is 2.
+        tx.send(CleanEvent::Started { name: "c".into() }).unwrap();
+        runtime.pump_clean(&mut app);
+        match &app.app_state {
+            AppState::Cleaning { current, total, .. } => {
+                assert_eq!((*current, *total), (1, 1));
+            }
+            other => panic!("unexpected state {other:?}"),
         }
     }
 }

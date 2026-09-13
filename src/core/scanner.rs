@@ -3,7 +3,6 @@ use crate::core::policy;
 use crate::core::registry::Target;
 use crate::core::{CleanMode, CleanupItem, ItemStatus};
 use rayon::prelude::*;
-use std::fs;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::SystemTime;
@@ -52,10 +51,7 @@ fn measure(path: &Path, mode: CleanMode, keep_days: Option<u64>) -> Option<ScanR
                 }
             }))
         }
-        (Some(days), _, _) => {
-            let meta = fs::symlink_metadata(path).ok()?;
-            policy::is_older_than(&meta, days, now).then(|| scan_path(path))
-        }
+        (Some(days), _, _) => policy::is_entry_older_than(path, days, now).then(|| scan_path(path)),
         (None, _, _) => Some(scan_path(path)),
     }
 }

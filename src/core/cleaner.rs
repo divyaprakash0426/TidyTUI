@@ -6,11 +6,12 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::SystemTime;
 
-/// Progress messages from a background cleaning run. `idx` is the caller's
-/// index into its own item list. Exactly one `Done` is sent last.
+/// Progress messages from a background cleaning run. Jobs run in order, so
+/// each `Started` is the next job; `idx` on `Finished` is the caller's index
+/// into its own item list. Exactly one `Done` is sent last.
 #[derive(Debug)]
 pub enum CleanEvent {
-    Started { idx: usize, name: String },
+    Started { name: String },
     Finished { idx: usize, status: ItemStatus },
     Done,
 }
@@ -22,7 +23,6 @@ pub fn spawn_clean(jobs: Vec<(usize, CleanupItem)>, dry_run: bool) -> Receiver<C
     std::thread::spawn(move || {
         for (idx, mut item) in jobs {
             let _ = tx.send(CleanEvent::Started {
-                idx,
                 name: item.name.clone(),
             });
             // Outcome is captured in item.status; the Err duplicates it.
@@ -157,7 +157,7 @@ mod tests {
         let it = item(dir.path(), CleanMode::Contents);
         let rx = spawn_clean(vec![(7, it)], false);
         let events: Vec<CleanEvent> = rx.iter().collect();
-        assert!(matches!(events[0], CleanEvent::Started { idx: 7, .. }));
+        assert!(matches!(events[0], CleanEvent::Started { .. }));
         assert!(matches!(
             events[1],
             CleanEvent::Finished {

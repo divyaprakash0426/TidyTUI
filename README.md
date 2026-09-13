@@ -143,7 +143,7 @@ groups:
 | `path` | Absolute path; `~` expands to your home directory |
 | `mode` | `contents` **empties** the folder but keeps it (safe for caches that tools expect to exist). `dir` removes the folder itself. Defaults to `contents`. |
 | `category` | Optional heading used to group items in the Results tab. Defaults to `Other`. |
-| `keep_days` | Optional. Only entries last modified at least this many days ago are counted and removed (top-level entries for `contents`, the target itself for `dir`/files). |
+| `keep_days` | Optional. Only entries whose contents were all last modified at least this many days ago are counted and removed (top-level entries for `contents`, the target itself for `dir`/files). A folder holding a single fresh file is kept whole. |
 | `min_size` | Optional. Hide the item unless it is at least this large, e.g. `"10 MiB"` or `"500 KB"`. |
 
 ## 🏗️ Technical Stack

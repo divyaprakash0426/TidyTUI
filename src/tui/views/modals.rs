@@ -217,7 +217,7 @@ pub fn render_progress(f: &mut Frame, current: usize, total: usize, item_name: &
         .split(area);
 
     let percentage = if total > 0 {
-        ((current as f64 / total as f64) * 100.0) as u16
+        (((current as f64 / total as f64) * 100.0) as u16).min(100)
     } else {
         100
     };

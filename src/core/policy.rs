@@ -5,6 +5,7 @@ use std::fs::{self, DirEntry, Metadata};
 use std::io;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
+use walkdir::WalkDir;
 
 const SECS_PER_DAY: u64 = 24 * 60 * 60;
 
@@ -18,8 +19,35 @@ pub fn is_older_than(meta: &Metadata, days: u64, now: SystemTime) -> bool {
     modified <= cutoff
 }
 
+/// Whether the entry (and, for a directory, everything beneath it) is older
+/// than `days`. A directory's own mtime only tracks its direct children, so
+/// bucketed caches look ancient while holding files written today; walking
+/// the subtree is the only way to know nothing fresh would be removed.
+/// Anything with an unreadable mtime is treated as fresh (kept).
+pub fn is_entry_older_than(path: &Path, days: u64, now: SystemTime) -> bool {
+    // symlink_metadata: judge the link itself, never its target
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !is_older_than(&meta, days, now) {
+        return false;
+    }
+    if !meta.is_dir() {
+        return true;
+    }
+    WalkDir::new(path)
+        .follow_links(false)
+        .min_depth(1)
+        .into_iter()
+        .all(|e| match e.and_then(|e| e.metadata()) {
+            Ok(m) => is_older_than(&m, days, now),
+            Err(_) => false,
+        })
+}
+
 /// Top-level entries of `dir` that may be removed. With `keep_days = Some(n)`
-/// only entries older than `n` days qualify; `None` means everything.
+/// only entries whose whole subtree is older than `n` days qualify; `None`
+/// means everything.
 pub fn eligible_entries(
     dir: &Path,
     keep_days: Option<u64>,
@@ -30,11 +58,7 @@ pub fn eligible_entries(
         let entry = entry?;
         let eligible = match keep_days {
             None => true,
-            // symlink_metadata: judge the link itself, never its target
-            Some(days) => match fs::symlink_metadata(entry.path()) {
-                Ok(meta) => is_older_than(&meta, days, now),
-                Err(_) => false,
-            },
+            Some(days) => is_entry_older_than(&entry.path(), days, now),
         };
         if eligible {
             out.push(entry);
@@ -50,12 +74,8 @@ mod tests {
 
     fn set_age(path: &Path, days: u64) {
         let t = SystemTime::now() - Duration::from_secs(days * SECS_PER_DAY);
-        File::options()
-            .write(true)
-            .open(path)
-            .unwrap()
-            .set_modified(t)
-            .unwrap();
+        // A read-only handle is enough for futimens, and it works on directories.
+        File::open(path).unwrap().set_modified(t).unwrap();
     }
 
     #[test]
@@ -69,6 +89,31 @@ mod tests {
         assert!(is_older_than(&meta, 9, now));
         assert!(is_older_than(&meta, 10, now));
         assert!(!is_older_than(&meta, 11, now));
+    }
+
+    #[test]
+    fn directory_entry_is_judged_by_its_newest_descendant() {
+        let dir = tempfile::tempdir().unwrap();
+        let bucket = dir.path().join("http");
+        fs::create_dir_all(bucket.join("a")).unwrap();
+        let fresh = bucket.join("a").join("fresh");
+        File::create(&fresh).unwrap();
+        // Bucket dirs keep an old mtime because their direct children never change.
+        set_age(&bucket.join("a"), 60);
+        set_age(&bucket, 60);
+
+        let now = SystemTime::now();
+        assert!(
+            eligible_entries(dir.path(), Some(30), now)
+                .unwrap()
+                .is_empty(),
+            "a directory containing a fresh file must not be eligible"
+        );
+        set_age(&fresh, 45);
+        assert_eq!(
+            eligible_entries(dir.path(), Some(30), now).unwrap().len(),
+            1
+        );
     }
 
     #[test]
