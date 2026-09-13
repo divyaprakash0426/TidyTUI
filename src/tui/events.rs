@@ -18,7 +18,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         AppState::Viewing => handle_viewing(app, key.code),
         AppState::Confirming => handle_confirming(app, key.code),
         AppState::Cleaning { .. } => Action::None,
+        AppState::Summary(_) => handle_summary(app, key.code),
     }
+}
+
+fn handle_summary(app: &mut App, code: KeyCode) -> Action {
+    if matches!(code, KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q')) {
+        app.app_state = AppState::Viewing;
+        app.active_tab = Tab::Results;
+    }
+    Action::None
 }
 
 fn handle_viewing(app: &mut App, code: KeyCode) -> Action {

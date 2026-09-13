@@ -39,6 +39,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             let (current, total, name) = (*current, *total, item_name.clone());
             modals::render_progress(f, current, total, &name, chunks[1]);
         }
+        AppState::Summary(summary) => {
+            let summary = summary.clone();
+            render_active_tab(f, app, chunks[1]);
+            modals::render_summary(f, &summary);
+        }
     }
 
     render_footer(f, app, chunks[2]);

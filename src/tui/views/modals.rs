@@ -1,5 +1,5 @@
 use crate::core::paths::shorten_home;
-use crate::tui::app::App;
+use crate::tui::app::{App, CleanSummary};
 use bytesize::ByteSize;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -97,6 +97,16 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
         .block(block)
         .alignment(Alignment::Center);
     f.render_widget(paragraph, area);
+}
+
+pub fn render_summary(f: &mut Frame, summary: &CleanSummary) {
+    let area = centered_rect(60, 40, f.area());
+    f.render_widget(Clear, area);
+    let text = format!("Cleanup complete: {} items", summary.deleted);
+    f.render_widget(
+        Paragraph::new(text).block(Block::default().borders(Borders::ALL)),
+        area,
+    );
 }
 
 pub fn render_progress(f: &mut Frame, current: usize, total: usize, item_name: &str, area: Rect) {

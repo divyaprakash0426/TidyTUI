@@ -1,4 +1,5 @@
-use crate::core::CleanupItem;
+use crate::core::registry::Target;
+use crate::core::{CleanupItem, ItemStatus};
 use ratatui::widgets::ListState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,17 @@ pub enum ResultRow {
     EmptyLine,
 }
 
+/// Outcome of a cleaning run, shown in the summary modal.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CleanSummary {
+    pub dry_run: bool,
+    /// Items deleted (or, in dry-run, items that would have been deleted).
+    pub deleted: usize,
+    pub freed_bytes: u64,
+    /// (item name, reason)
+    pub failed: Vec<(String, String)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppState {
     Viewing,
@@ -24,6 +36,14 @@ pub enum AppState {
         total: usize,
         item_name: String,
     },
+    Summary(CleanSummary),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanProgress {
+    pub checked: usize,
+    pub total: usize,
+    pub finished: bool,
 }
 
 pub struct App {
@@ -34,6 +54,9 @@ pub struct App {
     pub dry_run: bool,
     pub active_tab: Tab,
     pub app_state: AppState,
+    /// Resolved targets for the current OS; kept so a rescan can be started.
+    pub targets: Vec<Target>,
+    pub scan: ScanProgress,
 }
 
 impl App {
@@ -46,6 +69,11 @@ impl App {
             dry_run: true, // Safety default
             active_tab: Tab::Dashboard,
             app_state: AppState::Viewing,
+            targets: Vec::new(),
+            scan: ScanProgress {
+                finished: true,
+                ..ScanProgress::default()
+            },
         }
     }
 
@@ -58,6 +86,83 @@ impl App {
         if !self.rendered_rows.is_empty() {
             self.next(); // Find first selectable item
         }
+    }
+
+    // --- Scanning -------------------------------------------------------
+
+    pub fn begin_scan(&mut self, total: usize) {
+        self.set_items(Vec::new());
+        self.state.select(None);
+        self.scan = ScanProgress {
+            checked: 0,
+            total,
+            finished: false,
+        };
+    }
+
+    /// Adds an item from an in-progress scan, keeping the highlight on the
+    /// same item even though category sorting may shift the rows. Appending
+    /// never moves existing indices, so the item index is a stable identity.
+    pub fn push_item(&mut self, item: CleanupItem) {
+        let keep = self.selected_index();
+        self.total_size += item.size_bytes;
+        self.items.push(item);
+        self.scan.checked += 1;
+        self.calculate_rendered_rows();
+
+        let row = keep.and_then(|idx| {
+            self.rendered_rows
+                .iter()
+                .position(|r| matches!(r, ResultRow::Item(i) if *i == idx))
+        });
+        match row {
+            Some(r) => self.state.select(Some(r)),
+            None => {
+                self.state.select(Some(0));
+                self.next();
+            }
+        }
+    }
+
+    pub fn note_missing(&mut self) {
+        self.scan.checked += 1;
+    }
+
+    pub fn finish_scan(&mut self) {
+        self.scan.finished = true;
+    }
+
+    pub fn is_scanning(&self) -> bool {
+        !self.scan.finished
+    }
+
+    // --- Cleaning -------------------------------------------------------
+
+    pub fn apply_clean_result(&mut self, idx: usize, status: ItemStatus) {
+        if let Some(item) = self.items.get_mut(idx) {
+            item.status = status;
+        }
+    }
+
+    /// Must be called before `cleanup_finished`, which drops deleted items.
+    pub fn build_summary(&self) -> CleanSummary {
+        let mut summary = CleanSummary {
+            dry_run: self.dry_run,
+            ..CleanSummary::default()
+        };
+        for item in self.items.iter().filter(|i| i.selected) {
+            match &item.status {
+                ItemStatus::Deleted | ItemStatus::DryRun => {
+                    summary.deleted += 1;
+                    summary.freed_bytes += item.size_bytes;
+                }
+                ItemStatus::Failed(reason) => {
+                    summary.failed.push((item.name.clone(), reason.clone()));
+                }
+                ItemStatus::Scanned => {}
+            }
+        }
+        summary
     }
 
     fn calculate_rendered_rows(&mut self) {
@@ -171,7 +276,6 @@ impl App {
     }
 
     pub fn cleanup_finished(&mut self) {
-        use crate::core::ItemStatus;
         // Deleted items vanish; DryRun/Failed stay so the user sees the outcome.
         self.items
             .retain(|i| !matches!(i.status, ItemStatus::Deleted));
@@ -246,6 +350,63 @@ mod tests {
         let app = App::new();
         assert!(app.selected_item().is_none());
         assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn push_item_keeps_highlight_on_same_item() {
+        let mut app = App::new();
+        app.begin_scan(3);
+        app.push_item(item("m", "M", 1));
+        assert_eq!(app.selected_item().unwrap().name, "m");
+        app.push_item(item("a", "A", 1)); // sorts before M → rows shift
+        assert_eq!(app.selected_item().unwrap().name, "m");
+        assert_eq!(app.scan.checked, 2);
+        assert!(app.is_scanning());
+        app.note_missing();
+        app.finish_scan();
+        assert!(!app.is_scanning());
+        assert_eq!(app.scan.checked, 3);
+        assert_eq!(app.total_size, 2);
+    }
+
+    #[test]
+    fn begin_scan_clears_previous_items() {
+        let mut app = App::new();
+        app.set_items(vec![item("old", "A", 5)]);
+        app.begin_scan(1);
+        assert!(app.items.is_empty());
+        assert_eq!(app.total_size, 0);
+        assert!(app.selected_item().is_none());
+    }
+
+    #[test]
+    fn build_summary_counts_deleted_failed_and_bytes() {
+        let mut app = App::new();
+        let mut a = item("a", "A", 10);
+        a.selected = true;
+        let mut b = item("b", "A", 5);
+        b.selected = true;
+        let c = item("c", "A", 99);
+        app.set_items(vec![a, b, c]);
+        app.apply_clean_result(0, ItemStatus::Deleted);
+        app.apply_clean_result(1, ItemStatus::Failed("denied".into()));
+        let s = app.build_summary();
+        assert_eq!(s.deleted, 1);
+        assert_eq!(s.freed_bytes, 10);
+        assert_eq!(s.failed, vec![("b".to_string(), "denied".to_string())]);
+        assert!(s.dry_run);
+    }
+
+    #[test]
+    fn build_summary_dry_run_counts_would_delete() {
+        let mut app = App::new();
+        let mut a = item("a", "A", 10);
+        a.selected = true;
+        app.set_items(vec![a]);
+        app.apply_clean_result(0, ItemStatus::DryRun);
+        let s = app.build_summary();
+        assert_eq!(s.deleted, 1);
+        assert_eq!(s.freed_bytes, 10);
     }
 
     #[test]
