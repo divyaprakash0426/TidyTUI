@@ -1,7 +1,7 @@
 use crate::core::registry::Target;
 use crate::core::{CleanupItem, ItemStatus};
 use ratatui::widgets::ListState;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -56,6 +56,14 @@ impl SortMode {
             SortMode::Default => SortMode::SizeDesc,
             SortMode::SizeDesc => SortMode::NameAsc,
             SortMode::NameAsc => SortMode::Default,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortMode::Default => "default",
+            SortMode::SizeDesc => "size",
+            SortMode::NameAsc => "name",
         }
     }
 }
@@ -345,6 +353,15 @@ impl App {
         for idx in self.visible_item_indices() {
             self.items[idx].selected = on;
         }
+    }
+
+    /// Number of filter-matching items per category.
+    pub fn category_counts(&self) -> HashMap<String, usize> {
+        let mut counts = HashMap::new();
+        for item in self.items.iter().filter(|i| self.item_matches_filter(i)) {
+            *counts.entry(item.category.clone()).or_insert(0) += 1;
+        }
+        counts
     }
 
     pub fn highlighted_row(&self) -> Option<&ResultRow> {

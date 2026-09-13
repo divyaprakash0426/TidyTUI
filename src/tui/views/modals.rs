@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph},
+    widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -99,14 +99,111 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
     f.render_widget(paragraph, area);
 }
 
+const MAX_FAILURES_SHOWN: usize = 6;
+
 pub fn render_summary(f: &mut Frame, summary: &CleanSummary) {
-    let area = centered_rect(60, 40, f.area());
+    let (title, verb, color) = if summary.dry_run {
+        (" Dry-Run Complete ", "Would delete", Color::Cyan)
+    } else {
+        (" Cleanup Complete ", "Deleted", Color::Green)
+    };
+
+    let mut text = vec![
+        Line::from(vec![
+            Span::raw(format!("{verb} ")),
+            Span::styled(
+                format!("{} items", summary.deleted),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(if summary.dry_run {
+                ", freeing "
+            } else {
+                ", freed "
+            }),
+            Span::styled(
+                ByteSize(summary.freed_bytes).to_string(),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+    ];
+
+    if summary.failed.is_empty() {
+        text.push(Line::from(Span::styled(
+            "No failures",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        text.push(Line::from(Span::styled(
+            format!("{} failed:", summary.failed.len()),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )));
+        for (name, reason) in summary.failed.iter().take(MAX_FAILURES_SHOWN) {
+            text.push(Line::from(vec![
+                Span::styled(format!("  {name}: "), Style::default().fg(Color::Red)),
+                Span::styled(reason.clone(), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+        if summary.failed.len() > MAX_FAILURES_SHOWN {
+            text.push(Line::from(Span::styled(
+                format!("  … and {} more", summary.failed.len() - MAX_FAILURES_SHOWN),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+
+    text.push(Line::from(""));
+    text.push(Line::from(vec![
+        Span::raw("Press "),
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" to continue"),
+    ]));
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(color))
+        .padding(Padding::uniform(1));
+    // borders + padding
+    let height = text.len() as u16 + 4;
+    let area = centered_fixed_height(60, height, f.area());
     f.render_widget(Clear, area);
-    let text = format!("Cleanup complete: {} items", summary.deleted);
     f.render_widget(
-        Paragraph::new(text).block(Block::default().borders(Borders::ALL)),
+        Paragraph::new(text)
+            .block(block)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+/// A horizontally centred rect of `percent_x` width and exactly `height` rows
+/// (clamped to the available area), vertically centred.
+fn centered_fixed_height(percent_x: u16, height: u16, r: Rect) -> Rect {
+    let height = height.min(r.height);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(height),
+            Constraint::Fill(1),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(rows[1])[1]
 }
 
 pub fn render_progress(f: &mut Frame, current: usize, total: usize, item_name: &str, area: Rect) {
@@ -161,4 +258,41 @@ pub(super) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::views::test_util::render_to_string;
+
+    #[test]
+    fn summary_lists_counts_freed_and_failures() {
+        let summary = CleanSummary {
+            dry_run: false,
+            deleted: 3,
+            freed_bytes: 2 * 1024 * 1024,
+            failed: vec![("Trash".into(), "permission denied".into())],
+        };
+        let s = render_to_string(100, 24, |f| render_summary(f, &summary));
+        assert!(s.contains("Cleanup Complete"), "{s}");
+        assert!(s.contains("Deleted 3 items"), "{s}");
+        assert!(s.contains("2.0 MiB"), "{s}");
+        assert!(s.contains("1 failed"), "{s}");
+        assert!(s.contains("Trash"), "{s}");
+        assert!(s.contains("permission denied"), "{s}");
+        assert!(s.contains("Enter"), "{s}");
+    }
+
+    #[test]
+    fn summary_in_dry_run_says_would_delete() {
+        let summary = CleanSummary {
+            dry_run: true,
+            deleted: 2,
+            freed_bytes: 10,
+            failed: vec![],
+        };
+        let s = render_to_string(100, 24, |f| render_summary(f, &summary));
+        assert!(s.contains("Dry-Run"), "{s}");
+        assert!(s.contains("Would delete 2 items"), "{s}");
+    }
 }

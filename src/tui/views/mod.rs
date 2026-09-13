@@ -13,13 +13,33 @@ pub mod help;
 pub mod modals;
 pub mod results;
 
+#[cfg(test)]
+pub(crate) mod test_util {
+    use ratatui::{backend::TestBackend, Frame, Terminal};
+
+    /// Renders one frame at the given size and returns it as text.
+    pub fn render_to_string(width: u16, height: u16, draw: impl FnOnce(&mut Frame)) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(draw).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+}
+
 pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(f.area());
 
@@ -76,7 +96,34 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
-    let mode_text = if app.dry_run {
+    let dim = Style::default().fg(Color::DarkGray);
+    let key = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
+    let mut status = vec![
+        Span::raw("Found: "),
+        Span::styled(
+            ByteSize(app.total_size).to_string(),
+            Style::default().fg(Color::Magenta),
+        ),
+        Span::styled("  ·  ", dim),
+        Span::raw(format!("Selected: {} (", app.selected_count())),
+        Span::styled(
+            ByteSize(app.selected_size()).to_string(),
+            Style::default().fg(Color::Magenta),
+        ),
+        Span::raw(")"),
+    ];
+    if app.is_scanning() {
+        status.push(Span::styled("  ·  ", dim));
+        status.push(Span::styled(
+            format!("⟳ Scanning {}/{}", app.scan.checked, app.scan.total),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+    status.push(Span::styled("  ·  ", dim));
+    status.push(if app.dry_run {
         Span::styled(
             "DRY-RUN (Safe)",
             Style::default()
@@ -86,20 +133,104 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     } else {
         Span::styled(
             "DANGER (DELETING)",
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD | Modifier::RAPID_BLINK),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )
+    });
+
+    let hints = if app.app_state == AppState::Filtering {
+        Line::from(vec![
+            Span::styled("Filter: ", key),
+            Span::raw(app.filter.clone()),
+            Span::styled("▏", Style::default().fg(Color::Yellow)),
+            Span::styled("   Enter keep · Esc clear", dim),
+        ])
+    } else {
+        let hint = |k: &'static str, what: &'static str| {
+            vec![Span::styled(k, key), Span::raw(format!(" {what}  "))]
+        };
+        let mut spans = Vec::new();
+        spans.extend(hint("↑↓", "nav"));
+        spans.extend(hint("Space", "toggle"));
+        spans.extend(hint("a/A", "all/none"));
+        spans.extend(hint("z", "fold"));
+        spans.extend(hint("/", "filter"));
+        spans.extend(hint("s", "sort"));
+        spans.extend(hint("r", "rescan"));
+        spans.extend(hint("d", "mode"));
+        spans.extend(hint("Enter", "clean"));
+        spans.extend(hint("q", "quit"));
+        Line::from(spans)
     };
 
-    let footer_text = Line::from(vec![
-        Span::raw(format!("Total Found: {} | ", ByteSize(app.total_size))),
-        Span::raw("Tab: <Tab>, Nav: <Up/Down>, Toggle: <Space>, Mode: <d>, Clean: <Enter> | "),
-        mode_text,
-    ]);
-
-    let footer = Paragraph::new(footer_text)
-        .style(Style::default().fg(Color::Yellow))
+    let footer = Paragraph::new(vec![Line::from(status), hints])
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_util::render_to_string;
+    use super::*;
+    use crate::core::{CleanMode, CleanupItem, ItemStatus};
+    use crate::tui::app::CleanSummary;
+    use std::path::PathBuf;
+
+    fn app_with_item() -> App {
+        let mut app = App::new();
+        app.set_items(vec![CleanupItem {
+            name: "Pip".into(),
+            category: "Dev".into(),
+            description: None,
+            path: PathBuf::from("/x"),
+            size_bytes: 1,
+            file_count: 1,
+            selected: false,
+            status: ItemStatus::Scanned,
+            mode: CleanMode::Contents,
+        }]);
+        app.active_tab = Tab::Results;
+        app
+    }
+
+    #[test]
+    fn footer_shows_scan_progress_while_scanning() {
+        let mut app = app_with_item();
+        app.begin_scan(10);
+        app.note_missing();
+        app.note_missing();
+        let s = render_to_string(120, 20, |f| render(f, &mut app));
+        assert!(s.contains("Scanning 2/10"), "{s}");
+    }
+
+    #[test]
+    fn footer_shows_filter_prompt_when_filtering() {
+        let mut app = app_with_item();
+        app.app_state = AppState::Filtering;
+        app.set_filter("pi".into());
+        let s = render_to_string(120, 20, |f| render(f, &mut app));
+        assert!(s.contains("Filter: pi"), "{s}");
+        assert!(s.contains("Enter"), "{s}");
+    }
+
+    #[test]
+    fn footer_shows_selection_totals_and_mode() {
+        let mut app = app_with_item();
+        app.items[0].selected = true;
+        let s = render_to_string(120, 20, |f| render(f, &mut app));
+        assert!(s.contains("Selected: 1"), "{s}");
+        assert!(s.contains("DRY-RUN"), "{s}");
+    }
+
+    #[test]
+    fn summary_state_draws_modal_over_results() {
+        let mut app = app_with_item();
+        app.app_state = AppState::Summary(CleanSummary {
+            dry_run: false,
+            deleted: 2,
+            freed_bytes: 1024,
+            failed: vec![],
+        });
+        let s = render_to_string(120, 24, |f| render(f, &mut app));
+        assert!(s.contains("Cleanup Complete"), "{s}");
+    }
 }
