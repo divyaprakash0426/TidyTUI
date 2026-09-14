@@ -9,6 +9,8 @@ readme = "README.md"
 authors = ["Divyaprakash Dhurandhar <divyaprakash.0426@gmail.com>"]
 keywords = ["system", "cleaner", "tui", "cli", "maintenance"]
 categories = ["command-line-utilities", "filesystem"]
+# Keep the published crate lean; definitions.yaml must stay (it is include_str!'d).
+exclude = ["assets/", ".github/", "packaging/"]
 
 [dependencies]
 anyhow = "1.0.100"
@@ -32,7 +34,7 @@ tempfile = "3"
 
 [package.metadata.deb]
 maintainer = "Divyaprakash Dhurandhar <divyaprakash.0426@gmail.com>"
-copyright = "2024-2025 Divyaprakash Dhurandhar"
+copyright = "2024-2026 Divyaprakash Dhurandhar"
 license-file = ["LICENSE", "4"]
 extended-description = """
 TidyTUI is a blazingly fast, terminal-based system cleaner written in Rust.
