@@ -236,7 +236,7 @@ fn render_distribution(f: &mut Frame, app: &App, area: Rect) {
 fn render_largest(f: &mut Frame, app: &App, area: Rect) {
     let th = app.theme;
     let mut items: Vec<_> = app.items.iter().collect();
-    items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    items.sort_by_key(|i| std::cmp::Reverse(i.size_bytes));
 
     let lines: Vec<Line> = items
         .iter()

@@ -165,7 +165,7 @@ fn main() -> anyhow::Result<()> {
 fn run_headless(cli: &Cli, targets: Vec<registry::Target>) -> anyhow::Result<()> {
     let home = dirs::home_dir();
     let mut items = scanner::scan_targets(targets);
-    items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    items.sort_by_key(|i| std::cmp::Reverse(i.size_bytes));
 
     if !cli.select.is_empty() {
         let (kept, unknown) = headless::select_groups(items, &cli.select);

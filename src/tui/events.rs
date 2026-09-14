@@ -84,10 +84,8 @@ fn handle_viewing(app: &mut App, code: KeyCode) -> Action {
             app.app_state = AppState::Filtering;
         }
         KeyCode::Esc => app.set_filter(String::new()),
-        KeyCode::Enter => {
-            if app.selected_count() > 0 && !app.is_scanning() {
-                app.app_state = AppState::Confirming;
-            }
+        KeyCode::Enter if app.selected_count() > 0 && !app.is_scanning() => {
+            app.app_state = AppState::Confirming;
         }
         _ => {}
     }
